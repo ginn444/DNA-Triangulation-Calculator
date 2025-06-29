@@ -1,0 +1,295 @@
+import React, { useState } from 'react';
+import { Filter, Search, Tag, MapPin, Users, Edit3, Save, X } from 'lucide-react';
+import { FilterOptions, TriangulationGroup, GroupAnnotation } from '../types/triangulation';
+
+interface FilterAndAnnotationProps {
+  groups: TriangulationGroup[];
+  filterOptions: FilterOptions;
+  onFilterChange: (options: FilterOptions) => void;
+  onAnnotationChange: (groupId: number, annotation: GroupAnnotation) => void;
+  selectedGroup?: number;
+  onGroupSelect?: (groupId: number) => void;
+}
+
+export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
+  groups,
+  filterOptions,
+  onFilterChange,
+  onAnnotationChange,
+  selectedGroup,
+  onGroupSelect
+}) => {
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<number | null>(null);
+  const [annotationText, setAnnotationText] = useState('');
+  const [annotationSurnames, setAnnotationSurnames] = useState('');
+  const [annotationLocations, setAnnotationLocations] = useState('');
+  const [annotationTags, setAnnotationTags] = useState('');
+
+  const handleFilterChange = (key: keyof FilterOptions, value: any) => {
+    onFilterChange({
+      ...filterOptions,
+      [key]: value
+    });
+  };
+
+  const handleAnnotationSave = (groupId: number) => {
+    const annotation: GroupAnnotation = {
+      notes: annotationText || undefined,
+      surnames: annotationSurnames ? annotationSurnames.split(',').map(s => s.trim()) : undefined,
+      locations: annotationLocations ? annotationLocations.split(',').map(l => l.trim()) : undefined,
+      tags: annotationTags ? annotationTags.split(',').map(t => t.trim()) : undefined,
+      researchStatus: 'pending',
+      lastModified: new Date()
+    };
+
+    onAnnotationChange(groupId, annotation);
+    setEditingGroup(null);
+    setAnnotationText('');
+    setAnnotationSurnames('');
+    setAnnotationLocations('');
+    setAnnotationTags('');
+  };
+
+  const startEditing = (group: TriangulationGroup) => {
+    setEditingGroup(group.chromosome);
+    setAnnotationText(group.annotations?.notes || '');
+    setAnnotationSurnames(group.annotations?.surnames?.join(', ') || '');
+    setAnnotationLocations(group.annotations?.locations?.join(', ') || '');
+    setAnnotationTags(group.annotations?.tags?.join(', ') || '');
+  };
+
+  const filteredGroups = groups.filter(group => {
+    if (filterOptions.chromosome && group.chromosome !== filterOptions.chromosome) return false;
+    if (filterOptions.minSize && group.averageSize < filterOptions.minSize) return false;
+    if (filterOptions.maxSize && group.averageSize > filterOptions.maxSize) return false;
+    if (filterOptions.minMatches && group.matches.length < filterOptions.minMatches) return false;
+    if (filterOptions.maxMatches && group.matches.length > filterOptions.maxMatches) return false;
+    if (filterOptions.confidenceThreshold && group.confidenceScore < filterOptions.confidenceThreshold) return false;
+    if (filterOptions.searchTerm) {
+      const searchLower = filterOptions.searchTerm.toLowerCase();
+      const hasMatch = group.matches.some(match => 
+        match.matchName.toLowerCase().includes(searchLower)
+      ) || group.annotations?.surnames?.some(surname => 
+        surname.toLowerCase().includes(searchLower)
+      );
+      if (!hasMatch) return false;
+    }
+    return true;
+  });
+
+  const sortedGroups = [...filteredGroups].sort((a, b) => {
+    const aValue = a[filterOptions.sortBy];
+    const bValue = b[filterOptions.sortBy];
+    
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return filterOptions.sortOrder === 'asc' 
+        ? aValue.localeCompare(bValue)
+        : bValue.localeCompare(aValue);
+    }
+    
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      return filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+    }
+    
+    return 0;
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Filter Controls */}
+      <div className="bg-white rounded-lg shadow-lg p-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center">
+            <Filter className="w-5 h-5 text-gray-600 mr-2" />
+            <h3 className="text-lg font-semibold text-gray-800">Filters & Search</h3>
+          </div>
+          <button
+            onClick={() => setIsFilterOpen(!isFilterOpen)}
+            className="text-sm text-blue-600 hover:text-blue-700"
+          >
+            {isFilterOpen ? 'Hide' : 'Show'} Filters
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by match name or surnames..."
+            value={filterOptions.searchTerm || ''}
+            onChange={(e) => handleFilterChange('searchTerm', e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+
+        {isFilterOpen && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Chromosome Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Chromosome</label>
+              <select
+                value={filterOptions.chromosome || ''}
+                onChange={(e) => handleFilterChange('chromosome', e.target.value ? parseInt(e.target.value) : undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All</option>
+                {Array.from({ length: 23 }, (_, i) => i + 1).map(chr => (
+                  <option key={chr} value={chr}>{chr}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Size Range */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Min Size (cM)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={filterOptions.minSize || ''}
+                onChange={(e) => handleFilterChange('minSize', e.target.value ? parseFloat(e.target.value) : undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="0"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Size (cM)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={filterOptions.maxSize || ''}
+                onChange={(e) => handleFilterChange('maxSize', e.target.value ? parseFloat(e.target.value) : undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="∞"
+              />
+            </div>
+
+            {/* Match Count */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Min Matches</label>
+              <input
+                type="number"
+                min="1"
+                value={filterOptions.minMatches || ''}
+                onChange={(e) => handleFilterChange('minMatches', e.target.value ? parseInt(e.target.value) : undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="1"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Sort Controls */}
+        <div className="flex items-center space-x-4 mt-4">
+          <label className="text-sm font-medium text-gray-700">Sort by:</label>
+          <select
+            value={filterOptions.sortBy}
+            onChange={(e) => handleFilterChange('sortBy', e.target.value as any)}
+            className="px-3 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="chromosome">Chromosome</option>
+            <option value="size">Size</option>
+            <option value="matches">Matches</option>
+            <option value="confidence">Confidence</option>
+            <option value="startPosition">Start Position</option>
+          </select>
+          
+          <button
+            onClick={() => handleFilterChange('sortOrder', filterOptions.sortOrder === 'asc' ? 'desc' : 'asc')}
+            className="px-3 py-1 bg-gray-100 border border-gray-300 rounded text-sm hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {filterOptions.sortOrder === 'asc' ? '↑' : '↓'}
+          </button>
+        </div>
+      </div>
+
+      {/* Results Count */}
+      <div className="text-sm text-gray-600">
+        Showing {sortedGroups.length} of {groups.length} triangulation groups
+      </div>
+
+      {/* Annotation Editor */}
+      {editingGroup !== null && (
+        <div className="bg-white rounded-lg shadow-lg p-4 border-2 border-blue-200">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-lg font-semibold text-gray-800">Edit Annotation</h4>
+            <button
+              onClick={() => setEditingGroup(null)}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+              <textarea
+                value={annotationText}
+                onChange={(e) => setAnnotationText(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Add research notes..."
+              />
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Surnames (comma-separated)</label>
+                <input
+                  type="text"
+                  value={annotationSurnames}
+                  onChange={(e) => setAnnotationSurnames(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Smith, Jones, Brown"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Locations (comma-separated)</label>
+                <input
+                  type="text"
+                  value={annotationLocations}
+                  onChange={(e) => setAnnotationLocations(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="England, Scotland, Ireland"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tags (comma-separated)</label>
+              <input
+                type="text"
+                value={annotationTags}
+                onChange={(e) => setAnnotationTags(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="verified, brick-wall, colonial"
+              />
+            </div>
+            
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={() => setEditingGroup(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-md hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleAnnotationSave(editingGroup)}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <Save className="w-4 h-4 inline mr-1" />
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}; 
