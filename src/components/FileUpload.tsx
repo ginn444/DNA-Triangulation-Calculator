@@ -1,4 +1,4 @@
-const MAX_FILE_SIZE = Infinity; // or a really high value if neededimport React, { useCallback, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Upload, FileText, X, AlertCircle, CheckCircle } from 'lucide-react';
 
 interface FileUploadProps {
@@ -6,6 +6,7 @@ interface FileUploadProps {
 }
 
 const MAX_FILES = 10; // Maximum number of files
+const MAX_FILE_SIZE = Infinity; // or a really high value if needed
 
 export const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
   const [dragActive, setDragActive] = useState(false);
