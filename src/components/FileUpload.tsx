@@ -6,7 +6,7 @@ interface FileUploadProps {
 }
 
 const MAX_FILES = 10; // Maximum number of files
-const MAX_FILE_SIZE = Infinity; // or a really high value if needed
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 export const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
   const [dragActive, setDragActive] = useState(false);
@@ -41,7 +41,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
     const errors: string[] = [];
 
     // Check total number of files
-    if (files.length > MAX_FILES) {
+    if (files.length + selectedFiles.length > MAX_FILES) {
       const errorMsg = `Too many files selected. Maximum allowed is ${MAX_FILES} files.`;
       console.warn(errorMsg);
       setUploadError(errorMsg);
@@ -71,12 +71,13 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
     // Update files if we have valid ones
     if (validFiles.length > 0) {
       console.log('Setting valid files:', validFiles.map(f => f.name));
-      setSelectedFiles(validFiles);
-      onFilesUploaded(validFiles);
+      const newFiles = [...selectedFiles, ...validFiles];
+      setSelectedFiles(newFiles);
+      onFilesUploaded(newFiles);
     } else {
       console.warn('No valid files to process');
     }
-  }, [validateFile, onFilesUploaded]);
+  }, [validateFile, onFilesUploaded, selectedFiles]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
