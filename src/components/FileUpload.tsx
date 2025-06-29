@@ -5,6 +5,7 @@ interface FileUploadProps {
   onFilesUploaded: (files: File[]) => void;
 }
 
+const MAX_FILE_SIZE = Infinity; // or a really high value if needed
 const MAX_FILES = 10; // Maximum number of files
 
 export const FileUpload: React.FC<FileUploadProps> = ({ onFilesUploaded }) => {
