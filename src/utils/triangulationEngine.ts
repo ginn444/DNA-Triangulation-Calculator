@@ -1,6 +1,7 @@
-import { DNAMatch, TriangulationGroup, CSVRow, TriangulationSettings } from '../types/triangulation';
+import { DNAMatch, TriangulationGroup, CSVRow, TriangulationSettings, GenealogicalTree, TreeMatchInfo } from '../types/triangulation';
 import { parseCSV } from './csvParser';
 import { predictRelationship, calculateConfidenceScore } from './relationshipPredictor';
+import { extractSurnames, findCommonAncestors } from './gedcomParser';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7, // 7 cM minimum
@@ -15,7 +16,8 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
 export const processTriangulation = async (
   files: File[], 
   settings: TriangulationSettings = DEFAULT_SETTINGS,
-  onProgress: (message: string) => void
+  onProgress: (message: string) => void,
+  genealogicalTree: GenealogicalTree | null = null
 ): Promise<TriangulationGroup[]> => {
   onProgress('Parsing uploaded CSV files...');
   
@@ -45,7 +47,7 @@ export const processTriangulation = async (
   onProgress(`Processing ${allMatches.length} total DNA segments...`);
   
   // Find triangulations
-  const triangulationGroups = findTriangulations(allMatches, settings, onProgress);
+  const triangulationGroups = findTriangulations(allMatches, settings, onProgress, genealogicalTree);
   
   // Apply enhanced analysis if enabled
   if (settings.enableRelationshipPrediction || settings.enableConfidenceScoring) {
@@ -105,9 +107,24 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
   
   for (const row of csvData) {
     try {
-      // Get match name - try standardized field first, then fallback to original fields
-      let matchName = row['matchName'] || row['Match Names'] || row['Full Name'] || 
-                     row['First Name'] || row['Last Name'] || row['Name'];
+      // Enhanced match name extraction - try multiple fields and combine if needed
+      let matchName = '';
+      
+      // Try standardized field first
+      if (row['matchName']) {
+        matchName = row['matchName'];
+      } else {
+        // Try to construct from available name fields
+        const firstName = row['First Name'] || row['firstName'] || '';
+        const lastName = row['Last Name'] || row['lastName'] || '';
+        const fullName = row['Full Name'] || row['Name'] || row['Match Names'] || '';
+        
+        if (fullName) {
+          matchName = fullName;
+        } else if (firstName || lastName) {
+          matchName = `${firstName} ${lastName}`.trim();
+        }
+      }
       
       // If it's "Match Names" field, it might contain multiple names - take the first one
       if (matchName && (matchName.includes(',') || matchName.includes(';') || matchName.includes('|'))) {
@@ -135,6 +152,15 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
       const snpsField = row['matchingSNPs'] || row['Markers Tested'] || row['SNPs'];
       const matchingSNPs = snpsField ? parseInt(snpsField.replace(/,/g, '').trim()) : undefined;
       
+      // Extract haplogroups
+      const yHaplogroup = row['yHaplogroup'] || row['Y-DNA Haplogroup'] || row['Y Haplogroup'] || row['Paternal Haplogroup'];
+      const mtHaplogroup = row['mtHaplogroup'] || row['mtDNA Haplogroup'] || row['mt Haplogroup'] || row['Maternal Haplogroup'];
+      
+      // Extract additional genealogical data
+      const ancestralSurnames = row['ancestralSurnames'] || row['Ancestral Surnames'] || row['Surnames'];
+      const locations = row['locations'] || row['Paternal Country of Origin'] || row['Paternal Origin'];
+      const notes = row['notes'] || row['Notes'] || row['Comments'];
+      
       // Validate data
       if (matchName && 
           !isNaN(chromosome) && chromosome >= 1 && chromosome <= 23 &&
@@ -142,14 +168,23 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
           !isNaN(endPosition) && endPosition > startPosition &&
           !isNaN(sizeCM) && sizeCM >= settings.minimumSize) {
         
-        matches.push({
+        const match: DNAMatch = {
           matchName,
           chromosome,
           startPosition,
           endPosition,
           sizeCM,
           matchingSNPs: isNaN(matchingSNPs!) ? undefined : matchingSNPs
-        });
+        };
+        
+        // Add optional fields if available
+        if (yHaplogroup) match.yHaplogroup = yHaplogroup.trim();
+        if (mtHaplogroup) match.mtHaplogroup = mtHaplogroup.trim();
+        if (ancestralSurnames) match.ancestralSurnames = ancestralSurnames.split(/[,;|]/).map(s => s.trim()).filter(s => s);
+        if (locations) match.locations = locations.split(/[,;|]/).map(l => l.trim()).filter(l => l);
+        if (notes) match.notes = notes.trim();
+        
+        matches.push(match);
       }
     } catch (error) {
       // Skip invalid rows
@@ -165,7 +200,8 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
 const findTriangulations = (
   matches: DNAMatch[], 
   settings: TriangulationSettings,
-  onProgress: (message: string) => void
+  onProgress: (message: string) => void,
+  genealogicalTree: GenealogicalTree | null = null
 ): TriangulationGroup[] => {
   onProgress('Grouping segments by chromosome...');
   
@@ -185,7 +221,7 @@ const findTriangulations = (
   for (const [chromosome, chromosomeMatches] of matchesByChromosome) {
     onProgress(`Analyzing chromosome ${chromosome} (${chromosomeMatches.length} segments)...`);
     
-    const groups = findTriangulationsOnChromosome(chromosomeMatches, settings);
+    const groups = findTriangulationsOnChromosome(chromosomeMatches, settings, genealogicalTree);
     triangulationGroups.push(...groups);
   }
   
@@ -202,7 +238,8 @@ const findTriangulations = (
 
 const findTriangulationsOnChromosome = (
   matches: DNAMatch[], 
-  settings: TriangulationSettings
+  settings: TriangulationSettings,
+  genealogicalTree: GenealogicalTree | null = null
 ): TriangulationGroup[] => {
   const triangulationGroups: TriangulationGroup[] = [];
   const processedMatches = new Set<number>();
@@ -256,7 +293,8 @@ const findTriangulationsOnChromosome = (
         const totalSize = overlappingMatches.reduce((sum, match) => sum + match.sizeCM, 0);
         const averageSize = totalSize / overlappingMatches.length;
         
-        triangulationGroups.push({
+        // Create the triangulation group
+        const group: TriangulationGroup = {
           chromosome: baseMatch.chromosome,
           startPosition,
           endPosition,
@@ -264,7 +302,14 @@ const findTriangulationsOnChromosome = (
           averageSize,
           totalSize,
           confidenceScore: 0 // Will be calculated later
-        });
+        };
+        
+        // Integrate genealogical tree data if available
+        if (genealogicalTree && settings.enableCrossVerification) {
+          integrateGenealogicalData(group, genealogicalTree);
+        }
+        
+        triangulationGroups.push(group);
         
         // Mark these matches as processed
         overlappingIndices.forEach(index => processedMatches.add(index));
@@ -273,6 +318,75 @@ const findTriangulationsOnChromosome = (
   }
   
   return triangulationGroups;
+};
+
+const integrateGenealogicalData = (group: TriangulationGroup, genealogicalTree: GenealogicalTree): void => {
+  const allSurnames = new Set<string>();
+  const treeMatches: TreeMatchInfo[] = [];
+  
+  // Process each match in the group
+  for (const match of group.matches) {
+    // Extract surnames from match name
+    const matchSurnames = extractSurnamesFromName(match.matchName);
+    matchSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
+    
+    // Add ancestral surnames if available
+    if (match.ancestralSurnames) {
+      match.ancestralSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
+    }
+    
+    // Find matching individuals in the genealogical tree
+    const matchingIndividuals = genealogicalTree.individuals.filter(individual => {
+      const individualName = individual.name.toLowerCase();
+      const matchNameLower = match.matchName.toLowerCase();
+      
+      // Check if names match or contain each other
+      return individualName.includes(matchNameLower) || 
+             matchNameLower.includes(individualName) ||
+             individual.surnames.some(surname => 
+               matchSurnames.some(matchSurname => 
+                 surname.toLowerCase().includes(matchSurname.toLowerCase()) ||
+                 matchSurname.toLowerCase().includes(surname.toLowerCase())
+               )
+             );
+    });
+    
+    if (matchingIndividuals.length > 0) {
+      const commonSurnames = new Set<string>();
+      const suggestedAncestors = new Set<string>();
+      
+      matchingIndividuals.forEach(individual => {
+        individual.surnames.forEach(surname => commonSurnames.add(surname));
+        suggestedAncestors.add(individual.name);
+      });
+      
+      treeMatches.push({
+        matchName: match.matchName,
+        treeIndividuals: matchingIndividuals.map(i => i.name),
+        commonSurnames: Array.from(commonSurnames),
+        suggestedAncestors: Array.from(suggestedAncestors)
+      });
+    }
+  }
+  
+  // Set group-level data
+  group.surnames = Array.from(allSurnames);
+  group.treeMatches = treeMatches;
+  
+  // Find common ancestors using the genealogical tree
+  if (allSurnames.size > 0) {
+    const commonAncestors = findCommonAncestors(Array.from(allSurnames), genealogicalTree);
+    group.commonAncestors = commonAncestors.map(ancestor => ancestor.name);
+  }
+};
+
+const extractSurnamesFromName = (name: string): string[] => {
+  // Simple surname extraction - assumes last word is surname
+  const parts = name.trim().split(/\s+/);
+  if (parts.length > 1) {
+    return [parts[parts.length - 1]];
+  }
+  return [];
 };
 
 const calculateAverageOverlap = (matches: DNAMatch[]): number => {

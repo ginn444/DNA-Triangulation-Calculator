@@ -5,9 +5,15 @@ export interface DNAMatch {
   endPosition: number;
   sizeCM: number;
   matchingSNPs?: number;
-  // New fields for enhanced analysis
+  // Enhanced fields for genealogical analysis
+  yHaplogroup?: string;
+  mtHaplogroup?: string;
   relationshipPrediction?: RelationshipPrediction;
   confidenceScore?: number;
+  // Additional genealogical data
+  ancestralSurnames?: string[];
+  locations?: string[];
+  notes?: string;
 }
 
 export interface RelationshipPrediction {
@@ -24,12 +30,21 @@ export interface TriangulationGroup {
   matches: DNAMatch[];
   averageSize: number;
   totalSize: number;
-  // New fields for enhanced analysis
+  // Enhanced analysis fields
   confidenceScore: number;
   relationshipPrediction?: RelationshipPrediction;
   annotations?: GroupAnnotation;
   commonAncestors?: string[];
   surnames?: string[];
+  // Genealogical tree integration
+  treeMatches?: TreeMatchInfo[];
+}
+
+export interface TreeMatchInfo {
+  matchName: string;
+  treeIndividuals: string[];
+  commonSurnames: string[];
+  suggestedAncestors: string[];
 }
 
 export interface GroupAnnotation {
@@ -51,7 +66,7 @@ export interface TriangulationSettings {
   minimumSize: number; // Minimum segment size in cM
   minimumMatches: number; // Minimum number of matches for triangulation
   overlapThreshold: number; // Minimum overlap percentage
-  // New settings for enhanced features
+  // Enhanced features
   enableRelationshipPrediction: boolean;
   enableConfidenceScoring: boolean;
   enableCrossVerification: boolean;

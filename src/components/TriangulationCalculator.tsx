@@ -86,7 +86,8 @@ export const TriangulationCalculator: React.FC = () => {
       const results = await processTriangulation(
         uploadedFiles, 
         settings,
-        (message) => setProcessingMessage(message)
+        (message) => setProcessingMessage(message),
+        genealogicalTree // Pass the genealogical tree
       );
       
       setTriangulationGroups(results);
@@ -125,7 +126,7 @@ Please check that your CSV files contain:
       setProcessingStatus('error');
       setProcessingMessage('');
     }
-  }, [uploadedFiles, settings]);
+  }, [uploadedFiles, settings, genealogicalTree]);
 
   const handleReset = useCallback(() => {
     setUploadedFiles([]);
@@ -142,10 +143,10 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Total Matches,Confidence Score,Relationship Prediction,Notes,Surnames,Locations,Tags',
+      'Group ID,Match Name,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Notes,Surnames,Locations,Tags,Tree Matches,Common Ancestors',
       ...triangulationGroups.flatMap((group, groupIndex) =>
         group.matches.map(match =>
-          `${groupIndex + 1},"${match.matchName}",${match.chromosome},${match.startPosition},${match.endPosition},${match.sizeCM.toFixed(2)},${match.matchingSNPs || 'N/A'},${group.matches.length},${group.confidenceScore || 'N/A'},"${group.relationshipPrediction?.relationship || 'N/A'}","${group.annotations?.notes || ''}","${group.annotations?.surnames?.join('; ') || ''}","${group.annotations?.locations?.join('; ') || ''}","${group.annotations?.tags?.join('; ') || ''}"`
+          `${groupIndex + 1},"${match.matchName}",${match.chromosome},${match.startPosition},${match.endPosition},${match.sizeCM.toFixed(2)},${match.matchingSNPs || 'N/A'},"${match.yHaplogroup || 'N/A'}","${match.mtHaplogroup || 'N/A'}",${group.matches.length},${group.confidenceScore || 'N/A'},"${group.relationshipPrediction?.relationship || 'N/A'}","${group.annotations?.notes || match.notes || ''}","${group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || ''}","${group.annotations?.locations?.join('; ') || match.locations?.join('; ') || ''}","${group.annotations?.tags?.join('; ') || ''}","${group.treeMatches?.map(tm => tm.treeIndividuals.join(', ')).join('; ') || ''}","${group.commonAncestors?.join('; ') || ''}"`
         )
       )
     ].join('\n');

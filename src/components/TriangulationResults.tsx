@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, MapPin, TrendingUp, Filter, ChevronDown, ChevronUp, Edit3, Tag, Star } from 'lucide-react';
+import { Users, MapPin, TrendingUp, Filter, ChevronDown, ChevronUp, Edit3, Tag, Star, TreePine, Dna } from 'lucide-react';
 import { TriangulationGroup, GroupAnnotation } from '../types/triangulation';
 
 interface TriangulationResultsProps {
@@ -155,13 +155,32 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                       )}
                     </div>
                     
-                    {/* Annotation indicator */}
-                    {group.annotations && (
-                      <div className="flex items-center text-xs text-gray-500">
-                        <Tag className="w-3 h-3 mr-1" />
-                        {group.annotations.surnames?.length || 0} surnames
-                      </div>
-                    )}
+                    {/* Enhanced indicators */}
+                    <div className="flex flex-col items-center space-y-1">
+                      {/* Annotation indicator */}
+                      {group.annotations && (
+                        <div className="flex items-center text-xs text-gray-500">
+                          <Tag className="w-3 h-3 mr-1" />
+                          {group.annotations.surnames?.length || 0}
+                        </div>
+                      )}
+                      
+                      {/* Tree matches indicator */}
+                      {group.treeMatches && group.treeMatches.length > 0 && (
+                        <div className="flex items-center text-xs text-green-600">
+                          <TreePine className="w-3 h-3 mr-1" />
+                          {group.treeMatches.length}
+                        </div>
+                      )}
+                      
+                      {/* Haplogroup indicator */}
+                      {group.matches.some(m => m.yHaplogroup || m.mtHaplogroup) && (
+                        <div className="flex items-center text-xs text-purple-600">
+                          <Dna className="w-3 h-3 mr-1" />
+                          H
+                        </div>
+                      )}
+                    </div>
                     
                     {isExpanded ? (
                       <ChevronUp className="w-5 h-5 text-gray-400" />
@@ -173,6 +192,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
 
                 {isExpanded && (
                   <div className="mt-6 overflow-hidden">
+                    {/* Enhanced match details table */}
                     <div className="overflow-x-auto">
                       <table className="w-full">
                         <thead>
@@ -182,6 +202,9 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                             <th className="text-left py-3 px-4 font-medium text-gray-700">End Position</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Size (cM)</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">SNPs</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Y-Haplogroup</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">mtDNA</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Surnames</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -192,11 +215,86 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                               <td className="py-3 px-4 text-gray-600">{match.endPosition.toLocaleString()}</td>
                               <td className="py-3 px-4 text-gray-600">{match.sizeCM.toFixed(2)}</td>
                               <td className="py-3 px-4 text-gray-600">{match.matchingSNPs || 'N/A'}</td>
+                              <td className="py-3 px-4 text-gray-600">
+                                {match.yHaplogroup ? (
+                                  <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                                    {match.yHaplogroup}
+                                  </span>
+                                ) : (
+                                  'N/A'
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-gray-600">
+                                {match.mtHaplogroup ? (
+                                  <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded-full">
+                                    {match.mtHaplogroup}
+                                  </span>
+                                ) : (
+                                  'N/A'
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-gray-600">
+                                {match.ancestralSurnames ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {match.ancestralSurnames.slice(0, 3).map((surname, idx) => (
+                                      <span key={idx} className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded">
+                                        {surname}
+                                      </span>
+                                    ))}
+                                    {match.ancestralSurnames.length > 3 && (
+                                      <span className="text-xs text-gray-500">
+                                        +{match.ancestralSurnames.length - 3} more
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  'N/A'
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
+                    
+                    {/* Enhanced genealogical information */}
+                    {(group.treeMatches && group.treeMatches.length > 0) && (
+                      <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                        <h4 className="font-medium text-green-800 mb-2 flex items-center">
+                          <TreePine className="w-4 h-4 mr-2" />
+                          Genealogical Tree Matches
+                        </h4>
+                        <div className="space-y-2">
+                          {group.treeMatches.map((treeMatch, idx) => (
+                            <div key={idx} className="text-sm">
+                              <span className="font-medium text-green-700">{treeMatch.matchName}:</span>
+                              <span className="text-green-600 ml-2">
+                                {treeMatch.treeIndividuals.join(', ')}
+                              </span>
+                              {treeMatch.commonSurnames.length > 0 && (
+                                <div className="text-xs text-green-600 ml-4">
+                                  Common surnames: {treeMatch.commonSurnames.join(', ')}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Common ancestors */}
+                    {group.commonAncestors && group.commonAncestors.length > 0 && (
+                      <div className="mt-4 p-4 bg-yellow-50 rounded-lg">
+                        <h4 className="font-medium text-yellow-800 mb-2">Suggested Common Ancestors</h4>
+                        <div className="flex flex-wrap gap-2">
+                          {group.commonAncestors.map((ancestor, idx) => (
+                            <span key={idx} className="px-3 py-1 bg-yellow-200 text-yellow-800 text-sm rounded-full">
+                              {ancestor}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     
                     {/* Annotations */}
                     {group.annotations && (

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Filter, Search, Tag, MapPin, Users, Edit3, Save, X } from 'lucide-react';
 import { FilterOptions, TriangulationGroup, GroupAnnotation } from '../types/triangulation';
+import { extractGenerationNumber } from '../utils/relationshipPredictor';
 
 interface FilterAndAnnotationProps {
   groups: TriangulationGroup[];
@@ -67,36 +68,23 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
     if (filterOptions.maxMatches && group.matches.length > filterOptions.maxMatches) return false;
     if (filterOptions.confidenceThreshold && group.confidenceScore < filterOptions.confidenceThreshold) return false;
     if (filterOptions.cousinLevel && (!group.relationshipPrediction || !group.relationshipPrediction.relationship.includes(filterOptions.cousinLevel))) return false;
-    if (filterOptions.generation && (!group.relationshipPrediction || !extractGenerationNumber(group.relationshipPrediction.relationship) !== filterOptions.generation)) return false;
+    if (filterOptions.generation && group.relationshipPrediction) {
+      const groupGeneration = extractGenerationNumber(group.relationshipPrediction.relationship);
+      if (groupGeneration !== filterOptions.generation) return false;
+    }
     if (filterOptions.searchTerm) {
       const searchLower = filterOptions.searchTerm.toLowerCase();
       const hasMatch = group.matches.some(match => 
         match.matchName.toLowerCase().includes(searchLower)
       ) || group.annotations?.surnames?.some(surname => 
         surname.toLowerCase().includes(searchLower)
+      ) || group.surnames?.some(surname => 
+        surname.toLowerCase().includes(searchLower)
       );
       if (!hasMatch) return false;
     }
     return true;
   });
-
-  // Helper function to extract generation number from relationship prediction
-  const extractGenerationNumber = (relationship: string): number | null => {
-    if (!relationship) return null;
-    
-    // For relationships like "3rd Cousin" or "4th Cousin Once Removed"
-    const match = relationship.match(/(\d+)(st|nd|rd|th)/);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
-    
-    // For relationships like "Parent/Child", "Grandparent", etc.
-    if (relationship.includes('Parent/Child')) return 1;
-    if (relationship.includes('Grandparent')) return 2;
-    if (relationship.includes('Great-Grandparent')) return 3;
-    
-    return null;
-  };
 
   const sortedGroups = [...filteredGroups].sort((a, b) => {
     const aValue = a[filterOptions.sortBy];
@@ -206,7 +194,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
               <label className="block text-sm font-medium text-gray-700 mb-1">Cousin Level</label>
               <select
                 value={filterOptions.cousinLevel || ''}
-                onChange={(e) => handleFilterChange('cousinLevel', e.target.value)}
+                onChange={(e) => handleFilterChange('cousinLevel', e.target.value || undefined)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">All</option>
@@ -254,6 +242,19 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
                 placeholder="0"
               />
             </div>
+
+            {/* Max Matches */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Max Matches</label>
+              <input
+                type="number"
+                min="1"
+                value={filterOptions.maxMatches || ''}
+                onChange={(e) => handleFilterChange('maxMatches', e.target.value ? parseInt(e.target.value) : undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="∞"
+              />
+            </div>
           </div>
         )}
 
@@ -266,9 +267,9 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
             className="px-3 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="chromosome">Chromosome</option>
-            <option value="size">Size</option>
+            <option value="averageSize">Size</option>
             <option value="matches">Matches</option>
-            <option value="confidence">Confidence</option>
+            <option value="confidenceScore">Confidence</option>
             <option value="startPosition">Start Position</option>
           </select>
           
