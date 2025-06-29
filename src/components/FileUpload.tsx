@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+const MAX_FILE_SIZE = Infinity; // or a really high value if neededimport React, { useCallback, useState } from 'react';
 import { Upload, FileText, X, AlertCircle, CheckCircle } from 'lucide-react';
 
 interface FileUploadProps {
