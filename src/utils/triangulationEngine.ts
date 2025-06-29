@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
 
 // Interface for raw DNA match data before deduplication
 interface RawDNAMatch extends DNAMatch {
-  sourceFile?: string;
+  sourceFile: string;
 }
 
 // Interface for merged match profile during deduplication
@@ -30,6 +30,7 @@ interface MatchProfile {
   ancestralSurnames: Set<string>;
   locations: Set<string>;
   notes: Set<string>;
+  sourceFiles: Set<string>;
 }
 
 export const processTriangulation = async (
@@ -41,6 +42,7 @@ export const processTriangulation = async (
   onProgress('Parsing uploaded CSV files...');
   
   const allRawMatches: RawDNAMatch[] = [];
+  const nameIssues: string[] = [];
   
   // Parse all CSV files
   for (let i = 0; i < files.length; i++) {
@@ -51,10 +53,11 @@ export const processTriangulation = async (
       const csvData = await parseCSV(file);
       console.log(`CSV data from ${file.name}:`, csvData.slice(0, 3)); // Log first 3 rows for debugging
       
-      const matches = parseMatchesFromCSV(csvData, file.name, settings);
+      const { matches, issues } = parseMatchesFromCSV(csvData, file.name, settings);
       // Mark each match with its source file
       const markedMatches = matches.map(match => ({ ...match, sourceFile: file.name }));
       allRawMatches.push(...markedMatches);
+      nameIssues.push(...issues);
       onProgress(`Found ${matches.length} DNA segments in ${file.name}`);
     } catch (error) {
       throw new Error(`Error processing ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -63,6 +66,12 @@ export const processTriangulation = async (
   
   if (allRawMatches.length === 0) {
     throw new Error('No valid DNA segment data found in uploaded files. Please check that your CSV files contain the required columns: Chromosome, Start Location, End Location, and either Overlap cM or Shared DNA.');
+  }
+  
+  // Check for name issues and warn user
+  if (nameIssues.length > 0) {
+    console.warn('Name detection issues found:', nameIssues);
+    onProgress(`Warning: ${nameIssues.length} matches have unclear names - check your CSV headers`);
   }
   
   onProgress(`Deduplicating and merging ${allRawMatches.length} DNA segments...`);
@@ -124,7 +133,8 @@ const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (mess
         mtHaplogroup: match.mtHaplogroup,
         ancestralSurnames: new Set(match.ancestralSurnames || []),
         locations: new Set(match.locations || []),
-        notes: new Set(match.notes ? [match.notes] : [])
+        notes: new Set(match.notes ? [match.notes] : []),
+        sourceFiles: new Set([match.sourceFile])
       });
     }
     
@@ -133,6 +143,7 @@ const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (mess
     // Add this segment to the profile
     profile.segments.push(match);
     profile.nameVariations.add(match.matchName);
+    profile.sourceFiles.add(match.sourceFile);
     
     // Merge metadata (prioritize first non-empty values for single-value fields)
     if (!profile.yHaplogroup && match.yHaplogroup) {
@@ -164,12 +175,14 @@ const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (mess
     const mergedAncestralSurnames = Array.from(profile.ancestralSurnames).filter(s => s.trim());
     const mergedLocations = Array.from(profile.locations).filter(l => l.trim());
     const mergedNotes = Array.from(profile.notes).filter(n => n.trim()).join('; ');
+    const sourceFilesList = Array.from(profile.sourceFiles);
     
     // Update each segment with merged metadata and canonical display name
     for (const segment of profile.segments) {
       const enrichedMatch: DNAMatch = {
         ...segment,
         matchName: profile.displayName, // Use consistent display name
+        sourceFile: sourceFilesList.length > 1 ? sourceFilesList.join(', ') : segment.sourceFile,
         yHaplogroup: profile.yHaplogroup,
         mtHaplogroup: profile.mtHaplogroup,
         ancestralSurnames: mergedAncestralSurnames.length > 0 ? mergedAncestralSurnames : undefined,
@@ -214,8 +227,9 @@ const canonicalizeName = (name: string): string => {
   return canonical;
 };
 
-const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: TriangulationSettings): DNAMatch[] => {
+const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: TriangulationSettings): { matches: DNAMatch[], issues: string[] } => {
   const matches: DNAMatch[] = [];
+  const issues: string[] = [];
   
   // The CSV parser now standardizes field names, so we can use the standard field names
   const requiredFields = ['chromosome', 'startPosition', 'endPosition', 'sizeCM'];
@@ -223,7 +237,7 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
   
   if (!sampleRow) {
     console.warn(`No data found in ${fileName}`);
-    return matches;
+    return { matches, issues };
   }
   
   const availableFields = Object.keys(sampleRow);
@@ -238,27 +252,77 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
   if (!hasRequiredFields) {
     console.warn(`Missing required fields in ${fileName}. Available:`, availableFields);
     console.warn('Required fields:', requiredFields);
-    return matches;
+    return { matches, issues };
   }
   
-  for (const row of csvData) {
+  // Analyze potential name columns for quality
+  const nameColumns = availableFields.filter(field => 
+    ['matchName', 'Match Names', 'Match Name', 'Name', 'Full Name', 'First Name', 'Last Name'].some(nameField =>
+      field.toLowerCase().includes(nameField.toLowerCase())
+    )
+  );
+  
+  let bestNameColumn = '';
+  let bestNameScore = 0;
+  
+  // Score each potential name column based on content quality
+  for (const column of nameColumns) {
+    let score = 0;
+    let nonNumericCount = 0;
+    let totalCount = 0;
+    
+    for (const row of csvData.slice(0, Math.min(10, csvData.length))) { // Sample first 10 rows
+      const value = row[column]?.trim();
+      if (value) {
+        totalCount++;
+        // Check if value contains letters (not just numbers)
+        if (/[a-zA-Z]/.test(value) && !/^\d+$/.test(value)) {
+          nonNumericCount++;
+          // Bonus points for having spaces (likely full names)
+          if (value.includes(' ')) score += 2;
+          // Bonus points for having common name patterns
+          if (/^[A-Z][a-z]+ [A-Z][a-z]+/.test(value)) score += 3;
+        }
+      }
+    }
+    
+    if (totalCount > 0) {
+      const nonNumericRatio = nonNumericCount / totalCount;
+      score += nonNumericRatio * 10; // Weight heavily towards non-numeric content
+      
+      if (score > bestNameScore) {
+        bestNameScore = score;
+        bestNameColumn = column;
+      }
+    }
+  }
+  
+  console.log(`Best name column for ${fileName}: ${bestNameColumn} (score: ${bestNameScore})`);
+  
+  for (let rowIndex = 0; rowIndex < csvData.length; rowIndex++) {
+    const row = csvData[rowIndex];
+    
     try {
-      // Enhanced match name extraction - try multiple fields and combine if needed
+      // Enhanced match name extraction using the best column identified
       let matchName = '';
       
-      // Try standardized field first
-      if (row['matchName']) {
-        matchName = row['matchName'];
+      if (bestNameColumn && row[bestNameColumn]) {
+        matchName = row[bestNameColumn].trim();
       } else {
-        // Try to construct from available name fields
-        const firstName = row['First Name'] || row['firstName'] || '';
-        const lastName = row['Last Name'] || row['lastName'] || '';
-        const fullName = row['Full Name'] || row['Name'] || row['Match Names'] || '';
-        
-        if (fullName) {
-          matchName = fullName;
-        } else if (firstName || lastName) {
-          matchName = `${firstName} ${lastName}`.trim();
+        // Fallback to original logic
+        if (row['matchName']) {
+          matchName = row['matchName'];
+        } else {
+          // Try to construct from available name fields
+          const firstName = row['First Name'] || row['firstName'] || '';
+          const lastName = row['Last Name'] || row['lastName'] || '';
+          const fullName = row['Full Name'] || row['Name'] || row['Match Names'] || '';
+          
+          if (fullName) {
+            matchName = fullName;
+          } else if (firstName || lastName) {
+            matchName = `${firstName} ${lastName}`.trim();
+          }
         }
       }
       
@@ -266,6 +330,25 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
       if (matchName && (matchName.includes(',') || matchName.includes(';') || matchName.includes('|'))) {
         const nameParts = matchName.split(/[,;|]/);
         matchName = nameParts[0]?.trim();
+      }
+      
+      // Check if the name looks suspicious (purely numeric or very short)
+      if (matchName) {
+        if (/^\d+$/.test(matchName)) {
+          // Purely numeric - create a more descriptive name
+          const originalName = matchName;
+          matchName = `Match ${originalName} (from ${fileName})`;
+          issues.push(`Row ${rowIndex + 1}: Numeric match name "${originalName}" converted to "${matchName}"`);
+        } else if (matchName.length < 2) {
+          // Very short name - might be an issue
+          const originalName = matchName;
+          matchName = `Match "${originalName}" (from ${fileName})`;
+          issues.push(`Row ${rowIndex + 1}: Short match name "${originalName}" - please verify`);
+        }
+      } else {
+        // No name found - create a generic identifier
+        matchName = `Match ${rowIndex + 1} (from ${fileName})`;
+        issues.push(`Row ${rowIndex + 1}: No match name found - using generic identifier`);
       }
       
       // Get chromosome - try standardized field first
@@ -330,7 +413,11 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
   }
   
   console.log(`Parsed ${matches.length} valid matches from ${fileName}`);
-  return matches;
+  if (issues.length > 0) {
+    console.log(`Found ${issues.length} name issues in ${fileName}`);
+  }
+  
+  return { matches, issues };
 };
 
 const findTriangulations = (

@@ -44,10 +44,12 @@ export const TriangulationCalculator: React.FC = () => {
   const [genealogicalTree, setGenealogicalTree] = useState<GenealogicalTree | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [nameIssuesWarning, setNameIssuesWarning] = useState<string | null>(null);
 
   const handleFilesUploaded = useCallback(async (files: File[]) => {
     setUploadedFiles(files);
     setError(null);
+    setNameIssuesWarning(null);
     setTriangulationGroups([]);
     setProcessingStatus('idle');
     setCurrentPage(1);
@@ -81,12 +83,19 @@ export const TriangulationCalculator: React.FC = () => {
     setProcessingStatus('processing');
     setProcessingMessage('Reading uploaded files...');
     setError(null);
+    setNameIssuesWarning(null);
 
     try {
       const results = await processTriangulation(
         uploadedFiles, 
         settings,
-        (message) => setProcessingMessage(message),
+        (message) => {
+          setProcessingMessage(message);
+          // Check for name issues warning
+          if (message.includes('unclear names')) {
+            setNameIssuesWarning('Some matches have unclear names (like numbers). Check the "Source File" column to identify which file they came from.');
+          }
+        },
         genealogicalTree // Pass the genealogical tree
       );
       
@@ -134,6 +143,7 @@ Please check that your CSV files contain:
     setProcessingStatus('idle');
     setProcessingMessage('');
     setError(null);
+    setNameIssuesWarning(null);
     setSelectedGroup(undefined);
     setGenealogicalTree(null);
     setCurrentPage(1);
@@ -143,10 +153,10 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Notes,Surnames,Locations,Tags,Tree Matches,Common Ancestors',
+      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Notes,Surnames,Locations,Tags,Tree Matches,Common Ancestors',
       ...triangulationGroups.flatMap((group, groupIndex) =>
         group.matches.map(match =>
-          `${groupIndex + 1},"${match.matchName}",${match.chromosome},${match.startPosition},${match.endPosition},${match.sizeCM.toFixed(2)},${match.matchingSNPs || 'N/A'},"${match.yHaplogroup || 'N/A'}","${match.mtHaplogroup || 'N/A'}",${group.matches.length},${group.confidenceScore || 'N/A'},"${group.relationshipPrediction?.relationship || 'N/A'}","${group.annotations?.notes || match.notes || ''}","${group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || ''}","${group.annotations?.locations?.join('; ') || match.locations?.join('; ') || ''}","${group.annotations?.tags?.join('; ') || ''}","${group.treeMatches?.map(tm => tm.treeIndividuals.join(', ')).join('; ') || ''}","${group.commonAncestors?.join('; ') || ''}"`
+          `${groupIndex + 1},"${match.matchName}","${match.sourceFile || 'N/A'}",${match.chromosome},${match.startPosition},${match.endPosition},${match.sizeCM.toFixed(2)},${match.matchingSNPs || 'N/A'},"${match.yHaplogroup || 'N/A'}","${match.mtHaplogroup || 'N/A'}",${group.matches.length},${group.confidenceScore || 'N/A'},"${group.relationshipPrediction?.relationship || 'N/A'}","${group.annotations?.notes || match.notes || ''}","${group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || ''}","${group.annotations?.locations?.join('; ') || match.locations?.join('; ') || ''}","${group.annotations?.tags?.join('; ') || ''}","${group.treeMatches?.map(tm => tm.treeIndividuals.join(', ')).join('; ') || ''}","${group.commonAncestors?.join('; ') || ''}"`
         )
       )
     ].join('\n');
@@ -323,16 +333,26 @@ Please check that your CSV files contain:
           />
 
           {/* Processing Status */}
-          {(processingStatus !== 'idle' || error) && (
+          {(processingStatus !== 'idle' || error || nameIssuesWarning) && (
             <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
               <h3 className="text-lg font-semibold text-gray-800 mb-4">Status</h3>
               
               {error && (
-                <div className="flex items-start p-4 bg-red-50 rounded-xl border border-red-200">
+                <div className="flex items-start p-4 bg-red-50 rounded-xl border border-red-200 mb-4">
                   <AlertCircle className="w-5 h-5 text-red-600 mr-3 mt-0.5 flex-shrink-0" />
                   <div>
                     <h4 className="text-sm font-medium text-red-800">Error</h4>
                     <p className="text-sm text-red-700 mt-1">{error}</p>
+                  </div>
+                </div>
+              )}
+
+              {nameIssuesWarning && (
+                <div className="flex items-start p-4 bg-yellow-50 rounded-xl border border-yellow-200 mb-4">
+                  <AlertCircle className="w-5 h-5 text-yellow-600 mr-3 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-medium text-yellow-800">Name Detection Warning</h4>
+                    <p className="text-sm text-yellow-700 mt-1">{nameIssuesWarning}</p>
                   </div>
                 </div>
               )}

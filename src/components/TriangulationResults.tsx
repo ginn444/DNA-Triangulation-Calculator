@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, MapPin, TrendingUp, Filter, ChevronDown, ChevronUp, Edit3, Tag, Star, TreePine, Dna } from 'lucide-react';
+import { Users, MapPin, TrendingUp, Filter, ChevronDown, ChevronUp, Edit3, Tag, Star, TreePine, Dna, FileText } from 'lucide-react';
 import { TriangulationGroup, GroupAnnotation } from '../types/triangulation';
 
 interface TriangulationResultsProps {
@@ -198,6 +198,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                         <thead>
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Match Name</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Source File</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Start Position</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">End Position</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Size (cM)</th>
@@ -211,6 +212,18 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                           {group.matches.map((match, matchIndex) => (
                             <tr key={matchIndex} className="border-b border-gray-100 hover:bg-gray-50">
                               <td className="py-3 px-4 text-gray-800 font-medium">{match.matchName}</td>
+                              <td className="py-3 px-4 text-gray-600">
+                                {match.sourceFile ? (
+                                  <div className="flex items-center">
+                                    <FileText className="w-3 h-3 mr-1 text-gray-400" />
+                                    <span className="text-xs truncate max-w-24" title={match.sourceFile}>
+                                      {match.sourceFile}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  'N/A'
+                                )}
+                              </td>
                               <td className="py-3 px-4 text-gray-600">{match.startPosition.toLocaleString()}</td>
                               <td className="py-3 px-4 text-gray-600">{match.endPosition.toLocaleString()}</td>
                               <td className="py-3 px-4 text-gray-600">{match.sizeCM.toFixed(2)}</td>

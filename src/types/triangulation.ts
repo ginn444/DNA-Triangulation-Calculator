@@ -5,6 +5,7 @@ export interface DNAMatch {
   endPosition: number;
   sizeCM: number;
   matchingSNPs?: number;
+  sourceFile?: string; // New field to track which file this match came from
   // Enhanced fields for genealogical analysis
   yHaplogroup?: string;
   mtHaplogroup?: string;
