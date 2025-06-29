@@ -109,4 +109,22 @@ export const getRelationshipDescription = (relationship: string): string => {
   };
   
   return descriptions[relationship] || 'Distant relationship';
-}; 
+};
+
+// Helper function to extract generation number from relationship
+export const extractGenerationNumber = (relationship: string): number | null => {
+  if (!relationship) return null;
+  
+  // For relationships like "3rd Cousin" or "4th Cousin Once Removed"
+  const match = relationship.match(/(\d+)(st|nd|rd|th)/);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  
+  // For relationships like "Parent/Child", "Grandparent", etc.
+  if (relationship.includes('Parent/Child')) return 1;
+  if (relationship.includes('Grandparent')) return 2;
+  if (relationship.includes('Great-Grandparent')) return 3;
+  
+  return null;
+};

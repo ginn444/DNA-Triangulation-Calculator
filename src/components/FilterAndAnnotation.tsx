@@ -66,6 +66,8 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
     if (filterOptions.minMatches && group.matches.length < filterOptions.minMatches) return false;
     if (filterOptions.maxMatches && group.matches.length > filterOptions.maxMatches) return false;
     if (filterOptions.confidenceThreshold && group.confidenceScore < filterOptions.confidenceThreshold) return false;
+    if (filterOptions.cousinLevel && (!group.relationshipPrediction || !group.relationshipPrediction.relationship.includes(filterOptions.cousinLevel))) return false;
+    if (filterOptions.generation && (!group.relationshipPrediction || !extractGenerationNumber(group.relationshipPrediction.relationship) !== filterOptions.generation)) return false;
     if (filterOptions.searchTerm) {
       const searchLower = filterOptions.searchTerm.toLowerCase();
       const hasMatch = group.matches.some(match => 
@@ -77,6 +79,24 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
     }
     return true;
   });
+
+  // Helper function to extract generation number from relationship prediction
+  const extractGenerationNumber = (relationship: string): number | null => {
+    if (!relationship) return null;
+    
+    // For relationships like "3rd Cousin" or "4th Cousin Once Removed"
+    const match = relationship.match(/(\d+)(st|nd|rd|th)/);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+    
+    // For relationships like "Parent/Child", "Grandparent", etc.
+    if (relationship.includes('Parent/Child')) return 1;
+    if (relationship.includes('Grandparent')) return 2;
+    if (relationship.includes('Great-Grandparent')) return 3;
+    
+    return null;
+  };
 
   const sortedGroups = [...filteredGroups].sort((a, b) => {
     const aValue = a[filterOptions.sortBy];
@@ -178,6 +198,60 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
                 onChange={(e) => handleFilterChange('minMatches', e.target.value ? parseInt(e.target.value) : undefined)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="1"
+              />
+            </div>
+
+            {/* Cousin Level Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Cousin Level</label>
+              <select
+                value={filterOptions.cousinLevel || ''}
+                onChange={(e) => handleFilterChange('cousinLevel', e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All</option>
+                <option value="1st Cousin">1st Cousin</option>
+                <option value="2nd Cousin">2nd Cousin</option>
+                <option value="3rd Cousin">3rd Cousin</option>
+                <option value="4th Cousin">4th Cousin</option>
+                <option value="5th Cousin">5th Cousin</option>
+                <option value="6th Cousin">6th Cousin</option>
+                <option value="7th Cousin">7th Cousin</option>
+                <option value="8th Cousin">8th Cousin</option>
+              </select>
+            </div>
+
+            {/* Generation Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Generation</label>
+              <select
+                value={filterOptions.generation || ''}
+                onChange={(e) => handleFilterChange('generation', e.target.value ? parseInt(e.target.value) : undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All</option>
+                <option value="1">1 (Parent/Child)</option>
+                <option value="2">2 (Grandparent/Grandchild)</option>
+                <option value="3">3 (Great-Grandparent)</option>
+                <option value="4">4 (2nd Great-Grandparent)</option>
+                <option value="5">5 (3rd Great-Grandparent)</option>
+                <option value="6">6 (4th Great-Grandparent)</option>
+                <option value="7">7 (5th Great-Grandparent)</option>
+                <option value="8">8 (6th Great-Grandparent)</option>
+              </select>
+            </div>
+
+            {/* Confidence Threshold */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Min Confidence (%)</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={filterOptions.confidenceThreshold || ''}
+                onChange={(e) => handleFilterChange('confidenceThreshold', e.target.value ? parseInt(e.target.value) : undefined)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="0"
               />
             </div>
           </div>
@@ -292,4 +366,4 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
       )}
     </div>
   );
-}; 
+};

@@ -65,6 +65,8 @@ export interface FilterOptions {
   minMatches?: number;
   maxMatches?: number;
   confidenceThreshold?: number;
+  cousinLevel?: string;
+  generation?: number;
   searchTerm?: string;
   sortBy: 'chromosome' | 'size' | 'matches' | 'confidence' | 'startPosition';
   sortOrder: 'asc' | 'desc';
