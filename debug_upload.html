@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .upload-area { 
+            border: 2px dashed #ccc; 
+            padding: 40px; 
+            text-align: center; 
+            margin: 20px 0;
+            cursor: pointer;
+        }
+        .upload-area:hover { border-color: #007bff; background: #f8f9fa; }
+        .file-info { margin: 10px 0; padding: 10px; background: #e9ecef; border-radius: 4px; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h1>File Upload Debug Test</h1>
+    <p>This page helps test if your browser can handle file uploads properly.</p>
+    
+    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+        <p>Click here to select files</p>
+        <p><small>Or drag and drop files here</small></p>
+        <p><small><em>Flexible parser will detect CSV headers automatically</em></small></p>
+    </div>
+    
+    <input type="file" id="fileInput" accept="*/*" multiple style="display: none;" onchange="handleFileSelect(event)">
+    
+    <div id="results"></div>
+    
+    <script>
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            
+            console.log('Files selected:', files);
+            
+            if (files.length === 0) {
+                resultsDiv.innerHTML = '<p class="error">No files selected</p>';
+                return;
+            }
+            
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                console.log('File:', file.name, 'Size:', file.size, 'Type:', file.type);
+                
+                const fileInfo = document.createElement('div');
+                fileInfo.className = 'file-info';
+                fileInfo.innerHTML = `
+                    <h3>File ${i + 1}: ${file.name}</h3>
+                    <p><strong>Size:</strong> ${(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                    <p><strong>Type:</strong> ${file.type || 'Unknown'}</p>
+                    <p><strong>Last Modified:</strong> ${new Date(file.lastModified).toLocaleString()}</p>
+                    <p class="${file.size > 50 * 1024 * 1024 ? 'error' : 'success'}">
+                        <strong>Size Check:</strong> ${file.size > 50 * 1024 * 1024 ? 'TOO LARGE (>50MB)' : 'OK'}
+                    </p>
+                    <p class="success">
+                        <strong>File Type:</strong> ${file.name.toLowerCase().endsWith('.csv') ? 'CSV File' : 'Other file type (will be processed as CSV)'}
+                    </p>
+                `;
+                
+                resultsDiv.appendChild(fileInfo);
+            }
+        }
+        
+        // Drag and drop support
+        const uploadArea = document.querySelector('.upload-area');
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#007bff';
+            uploadArea.style.background = '#f8f9fa';
+        });
+        
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ccc';
+            uploadArea.style.background = 'white';
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ccc';
+            uploadArea.style.background = 'white';
+            
+            const files = e.dataTransfer.files;
+            console.log('Files dropped:', files);
+            
+            // Create a fake event to reuse the handler
+            const fakeEvent = { target: { files: files } };
+            handleFileSelect(fakeEvent);
+        });
+    </script>
+</body>
+</html> 
