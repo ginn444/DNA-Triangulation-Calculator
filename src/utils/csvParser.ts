@@ -1,6 +1,6 @@
 import { CSVRow } from '../types/triangulation';
 
-// Header mapping for different CSV formats
+// Enhanced header mapping with prioritization for name fields
 const HEADER_MAPPINGS = {
   // Chromosome and position fields
   chromosome: ['Chromosome', 'chromosome', 'CHR', 'chr'],
@@ -10,11 +10,20 @@ const HEADER_MAPPINGS = {
   // Size and overlap fields
   sizeCM: ['Overlap cM', 'Shared DNA', 'Size (cM)', 'cM', 'centimorgans', 'Centimorgans'],
   
-  // Match information
+  // Match information - PRIORITIZED for actual names
   matchName: [
-    'Match Names', 'Match Name', 'Name', 'Full Name', 'Match', 'Matches',
+    // High priority - likely to contain actual names
+    'Match Name', 'Full Name', 'Name', 'Display Name', 'Person Name',
+    'First Name Last Name', 'Given Name', 'Family Name',
+    // Medium priority - might contain names
+    'Match Names', 'Matches', 'Match',
+    // Lower priority - might be IDs but could be names
     'First Name', 'Last Name', 'Middle Name'
   ],
+  
+  // ID fields - explicitly separate from names
+  matchId: ['Match ID', 'ID', 'User ID', 'Kit Number', 'Kit ID'],
+  
   matchCount: ['Matches Count', 'Match Count', 'Number of Matches', 'Count'],
   
   // Additional fields that might be present
@@ -54,8 +63,8 @@ export const parseCSV = async (file: File): Promise<CSVRow[]> => {
         const rawHeaders = parseCSVRow(rows[0]);
         console.log(`File ${file.name} - Raw headers:`, rawHeaders);
         
-        // Create header mapping for this file
-        const headerMapping = createHeaderMapping(rawHeaders);
+        // Create header mapping for this file with enhanced name detection
+        const headerMapping = createEnhancedHeaderMapping(rawHeaders);
         console.log(`File ${file.name} - Header mapping:`, headerMapping);
         
         // Parse data rows
@@ -98,14 +107,64 @@ export const parseCSV = async (file: File): Promise<CSVRow[]> => {
   });
 };
 
-const createHeaderMapping = (headers: string[]): Record<string, string> => {
+const createEnhancedHeaderMapping = (headers: string[]): Record<string, string> => {
   const mapping: Record<string, string> = {};
   
+  // First pass: Find the best match name column using prioritization
+  let bestNameColumn = '';
+  let bestNameScore = 0;
+  
+  for (const header of headers) {
+    const trimmedHeader = header.trim();
+    
+    // Check if this header matches any name field variations
+    const nameVariations = HEADER_MAPPINGS.matchName;
+    for (let i = 0; i < nameVariations.length; i++) {
+      const variation = nameVariations[i];
+      if (trimmedHeader.toLowerCase() === variation.toLowerCase() ||
+          trimmedHeader.toLowerCase().includes(variation.toLowerCase()) ||
+          variation.toLowerCase().includes(trimmedHeader.toLowerCase())) {
+        
+        // Score based on priority (earlier in array = higher priority)
+        const priorityScore = nameVariations.length - i;
+        
+        // Bonus for exact matches
+        const exactMatchBonus = trimmedHeader.toLowerCase() === variation.toLowerCase() ? 10 : 0;
+        
+        // Penalty for headers that might be IDs
+        const idPenalty = /\b(id|number|kit)\b/i.test(trimmedHeader) ? -5 : 0;
+        
+        const totalScore = priorityScore + exactMatchBonus + idPenalty;
+        
+        if (totalScore > bestNameScore) {
+          bestNameScore = totalScore;
+          bestNameColumn = trimmedHeader;
+        }
+        break;
+      }
+    }
+  }
+  
+  // If we found a good name column, map it
+  if (bestNameColumn) {
+    mapping[bestNameColumn] = 'matchName';
+    console.log(`Selected "${bestNameColumn}" as primary name column (score: ${bestNameScore})`);
+  }
+  
+  // Second pass: Map all other fields
   headers.forEach(header => {
     const trimmedHeader = header.trim();
     
+    // Skip if already mapped as matchName
+    if (mapping[trimmedHeader]) {
+      return;
+    }
+    
     // Find which standard field this header maps to
     for (const [standardField, variations] of Object.entries(HEADER_MAPPINGS)) {
+      // Skip matchName since we handled it above
+      if (standardField === 'matchName') continue;
+      
       if (variations.some(variation => 
         trimmedHeader.toLowerCase() === variation.toLowerCase() ||
         trimmedHeader.toLowerCase().includes(variation.toLowerCase()) ||

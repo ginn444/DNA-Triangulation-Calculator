@@ -255,74 +255,24 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
     return { matches, issues };
   }
   
-  // Analyze potential name columns for quality
-  const nameColumns = availableFields.filter(field => 
-    ['matchName', 'Match Names', 'Match Name', 'Name', 'Full Name', 'First Name', 'Last Name'].some(nameField =>
-      field.toLowerCase().includes(nameField.toLowerCase())
-    )
-  );
-  
-  let bestNameColumn = '';
-  let bestNameScore = 0;
-  
-  // Score each potential name column based on content quality
-  for (const column of nameColumns) {
-    let score = 0;
-    let nonNumericCount = 0;
-    let totalCount = 0;
-    
-    for (const row of csvData.slice(0, Math.min(10, csvData.length))) { // Sample first 10 rows
-      const value = row[column]?.trim();
-      if (value) {
-        totalCount++;
-        // Check if value contains letters (not just numbers)
-        if (/[a-zA-Z]/.test(value) && !/^\d+$/.test(value)) {
-          nonNumericCount++;
-          // Bonus points for having spaces (likely full names)
-          if (value.includes(' ')) score += 2;
-          // Bonus points for having common name patterns
-          if (/^[A-Z][a-z]+ [A-Z][a-z]+/.test(value)) score += 3;
-        }
-      }
-    }
-    
-    if (totalCount > 0) {
-      const nonNumericRatio = nonNumericCount / totalCount;
-      score += nonNumericRatio * 10; // Weight heavily towards non-numeric content
-      
-      if (score > bestNameScore) {
-        bestNameScore = score;
-        bestNameColumn = column;
-      }
-    }
-  }
-  
-  console.log(`Best name column for ${fileName}: ${bestNameColumn} (score: ${bestNameScore})`);
-  
   for (let rowIndex = 0; rowIndex < csvData.length; rowIndex++) {
     const row = csvData[rowIndex];
     
     try {
-      // Enhanced match name extraction using the best column identified
-      let matchName = '';
+      // Enhanced match name extraction - now relies on the improved CSV parser
+      let matchName = row['matchName'] || '';
       
-      if (bestNameColumn && row[bestNameColumn]) {
-        matchName = row[bestNameColumn].trim();
-      } else {
-        // Fallback to original logic
-        if (row['matchName']) {
-          matchName = row['matchName'];
-        } else {
-          // Try to construct from available name fields
-          const firstName = row['First Name'] || row['firstName'] || '';
-          const lastName = row['Last Name'] || row['lastName'] || '';
-          const fullName = row['Full Name'] || row['Name'] || row['Match Names'] || '';
-          
-          if (fullName) {
-            matchName = fullName;
-          } else if (firstName || lastName) {
-            matchName = `${firstName} ${lastName}`.trim();
-          }
+      // If no matchName was mapped by the parser, try fallback logic
+      if (!matchName) {
+        // Try to construct from available name fields
+        const firstName = row['First Name'] || row['firstName'] || '';
+        const lastName = row['Last Name'] || row['lastName'] || '';
+        const fullName = row['Full Name'] || row['Name'] || row['Match Names'] || '';
+        
+        if (fullName) {
+          matchName = fullName;
+        } else if (firstName || lastName) {
+          matchName = `${firstName} ${lastName}`.trim();
         }
       }
       
