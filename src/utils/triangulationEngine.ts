@@ -13,6 +13,25 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
   maxResultsPerPage: 25
 };
 
+// Interface for raw DNA match data before deduplication
+interface RawDNAMatch extends DNAMatch {
+  sourceFile?: string;
+}
+
+// Interface for merged match profile during deduplication
+interface MatchProfile {
+  canonicalName: string;
+  displayName: string;
+  nameVariations: Set<string>;
+  segments: RawDNAMatch[];
+  // Merged metadata
+  yHaplogroup?: string;
+  mtHaplogroup?: string;
+  ancestralSurnames: Set<string>;
+  locations: Set<string>;
+  notes: Set<string>;
+}
+
 export const processTriangulation = async (
   files: File[], 
   settings: TriangulationSettings = DEFAULT_SETTINGS,
@@ -21,7 +40,7 @@ export const processTriangulation = async (
 ): Promise<TriangulationGroup[]> => {
   onProgress('Parsing uploaded CSV files...');
   
-  const allMatches: DNAMatch[] = [];
+  const allRawMatches: RawDNAMatch[] = [];
   
   // Parse all CSV files
   for (let i = 0; i < files.length; i++) {
@@ -33,21 +52,28 @@ export const processTriangulation = async (
       console.log(`CSV data from ${file.name}:`, csvData.slice(0, 3)); // Log first 3 rows for debugging
       
       const matches = parseMatchesFromCSV(csvData, file.name, settings);
-      allMatches.push(...matches);
+      // Mark each match with its source file
+      const markedMatches = matches.map(match => ({ ...match, sourceFile: file.name }));
+      allRawMatches.push(...markedMatches);
       onProgress(`Found ${matches.length} DNA segments in ${file.name}`);
     } catch (error) {
       throw new Error(`Error processing ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
   
-  if (allMatches.length === 0) {
+  if (allRawMatches.length === 0) {
     throw new Error('No valid DNA segment data found in uploaded files. Please check that your CSV files contain the required columns: Chromosome, Start Location, End Location, and either Overlap cM or Shared DNA.');
   }
   
-  onProgress(`Processing ${allMatches.length} total DNA segments...`);
+  onProgress(`Deduplicating and merging ${allRawMatches.length} DNA segments...`);
+  
+  // Deduplicate and merge matches
+  const deduplicatedMatches = deduplicateAndMergeMatches(allRawMatches, onProgress);
+  
+  onProgress(`Processing ${deduplicatedMatches.length} deduplicated DNA segments...`);
   
   // Find triangulations
-  const triangulationGroups = findTriangulations(allMatches, settings, onProgress, genealogicalTree);
+  const triangulationGroups = findTriangulations(deduplicatedMatches, settings, onProgress, genealogicalTree);
   
   // Apply enhanced analysis if enabled
   if (settings.enableRelationshipPrediction || settings.enableConfidenceScoring) {
@@ -76,6 +102,116 @@ export const processTriangulation = async (
   onProgress(`Analysis complete: Found ${triangulationGroups.length} triangulation groups`);
   
   return triangulationGroups;
+};
+
+const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (message: string) => void): DNAMatch[] => {
+  onProgress('Building canonicalization map...');
+  
+  // Step 1: Build canonicalization map
+  const profileMap = new Map<string, MatchProfile>();
+  
+  for (const match of rawMatches) {
+    const canonicalName = canonicalizeName(match.matchName);
+    
+    if (!profileMap.has(canonicalName)) {
+      // Create new profile
+      profileMap.set(canonicalName, {
+        canonicalName,
+        displayName: match.matchName, // Use first encountered name as display name
+        nameVariations: new Set([match.matchName]),
+        segments: [],
+        yHaplogroup: match.yHaplogroup,
+        mtHaplogroup: match.mtHaplogroup,
+        ancestralSurnames: new Set(match.ancestralSurnames || []),
+        locations: new Set(match.locations || []),
+        notes: new Set(match.notes ? [match.notes] : [])
+      });
+    }
+    
+    const profile = profileMap.get(canonicalName)!;
+    
+    // Add this segment to the profile
+    profile.segments.push(match);
+    profile.nameVariations.add(match.matchName);
+    
+    // Merge metadata (prioritize first non-empty values for single-value fields)
+    if (!profile.yHaplogroup && match.yHaplogroup) {
+      profile.yHaplogroup = match.yHaplogroup;
+    }
+    if (!profile.mtHaplogroup && match.mtHaplogroup) {
+      profile.mtHaplogroup = match.mtHaplogroup;
+    }
+    
+    // Merge multi-value fields
+    if (match.ancestralSurnames) {
+      match.ancestralSurnames.forEach(surname => profile.ancestralSurnames.add(surname));
+    }
+    if (match.locations) {
+      match.locations.forEach(location => profile.locations.add(location));
+    }
+    if (match.notes) {
+      profile.notes.add(match.notes);
+    }
+  }
+  
+  onProgress(`Merged ${rawMatches.length} segments into ${profileMap.size} unique individuals`);
+  
+  // Step 2: Create enriched DNAMatch objects
+  const enrichedMatches: DNAMatch[] = [];
+  
+  for (const profile of profileMap.values()) {
+    // Convert sets back to arrays for the final data structure
+    const mergedAncestralSurnames = Array.from(profile.ancestralSurnames).filter(s => s.trim());
+    const mergedLocations = Array.from(profile.locations).filter(l => l.trim());
+    const mergedNotes = Array.from(profile.notes).filter(n => n.trim()).join('; ');
+    
+    // Update each segment with merged metadata and canonical display name
+    for (const segment of profile.segments) {
+      const enrichedMatch: DNAMatch = {
+        ...segment,
+        matchName: profile.displayName, // Use consistent display name
+        yHaplogroup: profile.yHaplogroup,
+        mtHaplogroup: profile.mtHaplogroup,
+        ancestralSurnames: mergedAncestralSurnames.length > 0 ? mergedAncestralSurnames : undefined,
+        locations: mergedLocations.length > 0 ? mergedLocations : undefined,
+        notes: mergedNotes || undefined
+      };
+      
+      enrichedMatches.push(enrichedMatch);
+    }
+  }
+  
+  onProgress(`Created ${enrichedMatches.length} enriched DNA segments`);
+  
+  return enrichedMatches;
+};
+
+const canonicalizeName = (name: string): string => {
+  if (!name) return '';
+  
+  // Basic canonicalization: lowercase, trim, remove extra spaces
+  let canonical = name.toLowerCase().trim().replace(/\s+/g, ' ');
+  
+  // Handle common name format variations
+  // "Smith, John" -> "john smith"
+  if (canonical.includes(',')) {
+    const parts = canonical.split(',').map(p => p.trim());
+    if (parts.length === 2) {
+      canonical = `${parts[1]} ${parts[0]}`.trim();
+    }
+  }
+  
+  // Remove common prefixes/suffixes that might cause duplicates
+  canonical = canonical
+    .replace(/\b(jr|sr|ii|iii|iv)\b\.?/g, '') // Remove Jr, Sr, II, III, IV
+    .replace(/\b(mr|mrs|ms|dr|prof)\b\.?/g, '') // Remove titles
+    .replace(/\s+/g, ' ') // Clean up extra spaces
+    .trim();
+  
+  // Handle initials: "J. Smith" and "John Smith" should match if we have additional context
+  // For now, we'll use a simple approach - this could be enhanced with fuzzy matching
+  
+  return canonical;
 };
 
 const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: TriangulationSettings): DNAMatch[] => {
