@@ -33,6 +33,24 @@ interface MatchProfile {
   sourceFiles: Set<string>;
 }
 
+/**
+ * Deduplicates and cleans an array of names by removing duplicates,
+ * filtering out single-letter entries and empty strings, and sorting alphabetically.
+ */
+const deduplicateNames = (rawNames: string[]): string[] => {
+  // Join all names into a single string, then split by commas and spaces
+  const combinedNames = rawNames.join(', ');
+  
+  return Array.from(
+    new Set(
+      combinedNames
+        .split(/[,\s]+/)                      // Split on commas and spaces
+        .map(name => name.trim().toLowerCase()) // Normalize (trim + lowercase)
+        .filter(name => name.length > 1)         // Filter out junk/empty or 1-letter noise
+    )
+  ).sort(); // Alphabetize the results
+};
+
 export const processTriangulation = async (
   files: File[], 
   settings: TriangulationSettings = DEFAULT_SETTINGS,
@@ -535,7 +553,7 @@ const integrateGenealogicalData = (group: TriangulationGroup, genealogicalTree: 
       
       treeMatches.push({
         matchName: match.matchName,
-        treeIndividuals: matchingIndividuals.map(i => i.name),
+        treeIndividuals: deduplicateNames(matchingIndividuals.map(i => i.name)),
         commonSurnames: Array.from(commonSurnames),
         suggestedAncestors: Array.from(suggestedAncestors)
       });
