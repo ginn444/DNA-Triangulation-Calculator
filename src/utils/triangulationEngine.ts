@@ -97,6 +97,14 @@ export const processTriangulation = async (
   // Deduplicate and merge matches
   const deduplicatedMatches = deduplicateAndMergeMatches(allRawMatches, onProgress);
   
+  // Populate tree information for each DNA match if genealogical tree is available
+  if (genealogicalTree && settings.enableCrossVerification) {
+    onProgress('Enriching DNA matches with genealogical tree data...');
+    for (const match of deduplicatedMatches) {
+      populateDNAMatchTreeInfo(match, genealogicalTree);
+    }
+  }
+  
   onProgress(`Processing ${deduplicatedMatches.length} deduplicated DNA segments...`);
   
   // Find triangulations
@@ -129,6 +137,58 @@ export const processTriangulation = async (
   onProgress(`Analysis complete: Found ${triangulationGroups.length} triangulation groups`);
   
   return triangulationGroups;
+};
+
+const populateDNAMatchTreeInfo = (match: DNAMatch, genealogicalTree: GenealogicalTree): void => {
+  const treeMatches: TreeMatchInfo[] = [];
+  
+  // Extract surnames from match name
+  const matchSurnames = extractSurnamesFromName(match.matchName);
+  const allSurnames = new Set<string>();
+  
+  // Add surnames from match name
+  matchSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
+  
+  // Add ancestral surnames if available
+  if (match.ancestralSurnames) {
+    match.ancestralSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
+  }
+  
+  // Find matching individuals in the genealogical tree
+  const matchingIndividuals = genealogicalTree.individuals.filter(individual => {
+    const individualName = individual.name.toLowerCase();
+    const matchNameLower = match.matchName.toLowerCase();
+    
+    // Check if names match or contain each other
+    return individualName.includes(matchNameLower) || 
+           matchNameLower.includes(individualName) ||
+           individual.surnames.some(surname => 
+             matchSurnames.some(matchSurname => 
+               surname.toLowerCase().includes(matchSurname.toLowerCase()) ||
+               matchSurname.toLowerCase().includes(surname.toLowerCase())
+             )
+           );
+  });
+  
+  if (matchingIndividuals.length > 0) {
+    const commonSurnames = new Set<string>();
+    const suggestedAncestors = new Set<string>();
+    
+    matchingIndividuals.forEach(individual => {
+      individual.surnames.forEach(surname => commonSurnames.add(surname));
+      suggestedAncestors.add(individual.name);
+    });
+    
+    treeMatches.push({
+      matchName: match.matchName,
+      treeIndividuals: deduplicateNames(matchingIndividuals.map(i => i.name)),
+      commonSurnames: Array.from(commonSurnames),
+      suggestedAncestors: Array.from(suggestedAncestors)
+    });
+  }
+  
+  // Set the tree match info on the DNA match
+  match.treeMatchInfo = treeMatches.length > 0 ? treeMatches : undefined;
 };
 
 const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (message: string) => void): DNAMatch[] => {
@@ -406,31 +466,124 @@ const findTriangulations = (
     matchesByChromosome.get(match.chromosome)!.push(match);
   }
   
-  const triangulationGroups: TriangulationGroup[] = [];
+  const initialTriangulationGroups: TriangulationGroup[] = [];
   
-  // Process each chromosome
+  // Process each chromosome to find initial overlapping groups
   for (const [chromosome, chromosomeMatches] of matchesByChromosome) {
     onProgress(`Analyzing chromosome ${chromosome} (${chromosomeMatches.length} segments)...`);
     
-    const groups = findTriangulationsOnChromosome(chromosomeMatches, settings, genealogicalTree);
-    triangulationGroups.push(...groups);
+    const groups = findTriangulationsOnChromosome(chromosomeMatches, settings);
+    initialTriangulationGroups.push(...groups);
   }
   
-  // Sort groups by chromosome and then by start position
-  triangulationGroups.sort((a, b) => {
+  // Split groups by single common ancestor if genealogical tree is available
+  let finalGroups = initialTriangulationGroups;
+  if (genealogicalTree && settings.enableCrossVerification) {
+    onProgress('Splitting groups by common ancestors...');
+    finalGroups = splitGroupsBySingleCommonAncestor(initialTriangulationGroups, settings);
+  }
+  
+  // Sort groups by common ancestor first, then by chromosome and position
+  finalGroups.sort((a, b) => {
+    // First sort by common ancestor
+    const aAncestor = a.commonAncestors && a.commonAncestors.length > 0 ? a.commonAncestors[0] : '';
+    const bAncestor = b.commonAncestors && b.commonAncestors.length > 0 ? b.commonAncestors[0] : '';
+    
+    if (aAncestor !== bAncestor) {
+      return aAncestor.localeCompare(bAncestor);
+    }
+    
+    // Then by chromosome
     if (a.chromosome !== b.chromosome) {
       return a.chromosome - b.chromosome;
     }
+    
+    // Finally by start position
     return a.startPosition - b.startPosition;
   });
   
-  return triangulationGroups;
+  return finalGroups;
+};
+
+const splitGroupsBySingleCommonAncestor = (
+  initialGroups: TriangulationGroup[],
+  settings: TriangulationSettings
+): TriangulationGroup[] => {
+  const finalGroups: TriangulationGroup[] = [];
+  
+  for (const initialGroup of initialGroups) {
+    // Collect all unique suggested ancestors from the matches in this group
+    const ancestorToMatches = new Map<string, DNAMatch[]>();
+    
+    for (const match of initialGroup.matches) {
+      if (match.treeMatchInfo) {
+        for (const treeMatch of match.treeMatchInfo) {
+          for (const ancestor of treeMatch.suggestedAncestors) {
+            if (!ancestorToMatches.has(ancestor)) {
+              ancestorToMatches.set(ancestor, []);
+            }
+            ancestorToMatches.get(ancestor)!.push(match);
+          }
+        }
+      }
+    }
+    
+    // If no ancestors found, keep the original group
+    if (ancestorToMatches.size === 0) {
+      finalGroups.push(initialGroup);
+      continue;
+    }
+    
+    // Create new groups for each ancestor
+    for (const [ancestor, matchesForAncestor] of ancestorToMatches) {
+      // Remove duplicates (a match might be associated with the same ancestor multiple times)
+      const uniqueMatches = Array.from(new Set(matchesForAncestor));
+      
+      // Only create group if it meets minimum match requirements
+      if (uniqueMatches.length >= settings.minimumMatches) {
+        // Calculate the overlapping region for this subset
+        const startPosition = Math.max(...uniqueMatches.map(m => m.startPosition));
+        const endPosition = Math.min(...uniqueMatches.map(m => m.endPosition));
+        
+        if (endPosition > startPosition) {
+          const totalSize = uniqueMatches.reduce((sum, match) => sum + match.sizeCM, 0);
+          const averageSize = totalSize / uniqueMatches.length;
+          
+          // Create tree matches for this specific ancestor
+          const treeMatches: TreeMatchInfo[] = [];
+          for (const match of uniqueMatches) {
+            if (match.treeMatchInfo) {
+              const relevantTreeMatches = match.treeMatchInfo.filter(tm => 
+                tm.suggestedAncestors.includes(ancestor)
+              );
+              treeMatches.push(...relevantTreeMatches);
+            }
+          }
+          
+          const newGroup: TriangulationGroup = {
+            chromosome: initialGroup.chromosome,
+            startPosition,
+            endPosition,
+            matches: uniqueMatches,
+            averageSize,
+            totalSize,
+            confidenceScore: 0, // Will be calculated later
+            commonAncestors: [ancestor], // Single ancestor for this group
+            treeMatches: treeMatches.length > 0 ? treeMatches : undefined
+          };
+          
+          finalGroups.push(newGroup);
+        }
+      }
+    }
+  }
+  
+  return finalGroups;
 };
 
 const findTriangulationsOnChromosome = (
   matches: DNAMatch[], 
-  settings: TriangulationSettings,
-  genealogicalTree: GenealogicalTree | null = null
+  settings: TriangulationSettings
 ): TriangulationGroup[] => {
   const triangulationGroups: TriangulationGroup[] = [];
   const processedMatches = new Set<number>();
@@ -495,11 +648,6 @@ const findTriangulationsOnChromosome = (
           confidenceScore: 0 // Will be calculated later
         };
         
-        // Integrate genealogical tree data if available
-        if (genealogicalTree && settings.enableCrossVerification) {
-          integrateGenealogicalData(group, genealogicalTree);
-        }
-        
         triangulationGroups.push(group);
         
         // Mark these matches as processed
@@ -509,66 +657,6 @@ const findTriangulationsOnChromosome = (
   }
   
   return triangulationGroups;
-};
-
-const integrateGenealogicalData = (group: TriangulationGroup, genealogicalTree: GenealogicalTree): void => {
-  const allSurnames = new Set<string>();
-  const treeMatches: TreeMatchInfo[] = [];
-  
-  // Process each match in the group
-  for (const match of group.matches) {
-    // Extract surnames from match name
-    const matchSurnames = extractSurnamesFromName(match.matchName);
-    matchSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
-    
-    // Add ancestral surnames if available
-    if (match.ancestralSurnames) {
-      match.ancestralSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
-    }
-    
-    // Find matching individuals in the genealogical tree
-    const matchingIndividuals = genealogicalTree.individuals.filter(individual => {
-      const individualName = individual.name.toLowerCase();
-      const matchNameLower = match.matchName.toLowerCase();
-      
-      // Check if names match or contain each other
-      return individualName.includes(matchNameLower) || 
-             matchNameLower.includes(individualName) ||
-             individual.surnames.some(surname => 
-               matchSurnames.some(matchSurname => 
-                 surname.toLowerCase().includes(matchSurname.toLowerCase()) ||
-                 matchSurname.toLowerCase().includes(surname.toLowerCase())
-               )
-             );
-    });
-    
-    if (matchingIndividuals.length > 0) {
-      const commonSurnames = new Set<string>();
-      const suggestedAncestors = new Set<string>();
-      
-      matchingIndividuals.forEach(individual => {
-        individual.surnames.forEach(surname => commonSurnames.add(surname));
-        suggestedAncestors.add(individual.name);
-      });
-      
-      treeMatches.push({
-        matchName: match.matchName,
-        treeIndividuals: deduplicateNames(matchingIndividuals.map(i => i.name)),
-        commonSurnames: Array.from(commonSurnames),
-        suggestedAncestors: Array.from(suggestedAncestors)
-      });
-    }
-  }
-  
-  // Set group-level data
-  group.surnames = Array.from(allSurnames);
-  group.treeMatches = treeMatches;
-  
-  // Find common ancestors using the genealogical tree
-  if (allSurnames.size > 0) {
-    const commonAncestors = findCommonAncestors(Array.from(allSurnames), genealogicalTree);
-    group.commonAncestors = commonAncestors.map(ancestor => ancestor.name);
-  }
 };
 
 const extractSurnamesFromName = (name: string): string[] => {

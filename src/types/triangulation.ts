@@ -15,6 +15,8 @@ export interface DNAMatch {
   ancestralSurnames?: string[];
   locations?: string[];
   notes?: string;
+  // Tree match information for this specific DNA match
+  treeMatchInfo?: TreeMatchInfo[];
 }
 
 export interface RelationshipPrediction {
