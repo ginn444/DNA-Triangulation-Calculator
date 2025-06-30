@@ -10,6 +10,7 @@ interface FilterAndAnnotationProps {
   onAnnotationChange: (groupId: number, annotation: GroupAnnotation) => void;
   selectedGroup?: number;
   onGroupSelect?: (groupId: number) => void;
+  filteredGroupsCount: number;
 }
 
 export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
@@ -18,7 +19,8 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
   onFilterChange,
   onAnnotationChange,
   selectedGroup,
-  onGroupSelect
+  onGroupSelect,
+  filteredGroupsCount
 }) => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<number | null>(null);
@@ -60,58 +62,8 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
     setAnnotationTags(group.annotations?.tags?.join(', ') || '');
   };
 
-  const filteredGroups = groups.filter(group => {
-    if (filterOptions.chromosome && group.chromosome !== filterOptions.chromosome) return false;
-    if (filterOptions.minSize && group.averageSize < filterOptions.minSize) return false;
-    if (filterOptions.maxSize && group.averageSize > filterOptions.maxSize) return false;
-    if (filterOptions.minMatches && group.matches.length < filterOptions.minMatches) return false;
-    if (filterOptions.maxMatches && group.matches.length > filterOptions.maxMatches) return false;
-    if (filterOptions.confidenceThreshold && group.confidenceScore < filterOptions.confidenceThreshold) return false;
-    if (filterOptions.cousinLevel && (!group.relationshipPrediction || !group.relationshipPrediction.relationship.includes(filterOptions.cousinLevel))) return false;
-    if (filterOptions.generation && group.relationshipPrediction) {
-      const groupGeneration = extractGenerationNumber(group.relationshipPrediction.relationship);
-      if (groupGeneration !== filterOptions.generation) return false;
-    }
-    if (filterOptions.searchTerm) {
-      const searchLower = filterOptions.searchTerm.toLowerCase();
-      const hasMatch = group.matches.some(match => 
-        match.matchName.toLowerCase().includes(searchLower)
-      ) || group.annotations?.surnames?.some(surname => 
-        surname.toLowerCase().includes(searchLower)
-      ) || group.surnames?.some(surname => 
-        surname.toLowerCase().includes(searchLower)
-      );
-      if (!hasMatch) return false;
-    }
-    return true;
-  });
-
-  const sortedGroups = [...filteredGroups].sort((a, b) => {
-    if (filterOptions.sortBy === 'commonAncestors') {
-      // Sort by first common ancestor alphabetically
-      const aAncestor = a.commonAncestors && a.commonAncestors.length > 0 ? a.commonAncestors[0] : '';
-      const bAncestor = b.commonAncestors && b.commonAncestors.length > 0 ? b.commonAncestors[0] : '';
-      
-      return filterOptions.sortOrder === 'asc' 
-        ? aAncestor.localeCompare(bAncestor)
-        : bAncestor.localeCompare(aAncestor);
-    }
-    
-    const aValue = a[filterOptions.sortBy];
-    const bValue = b[filterOptions.sortBy];
-    
-    if (typeof aValue === 'string' && typeof bValue === 'string') {
-      return filterOptions.sortOrder === 'asc' 
-        ? aValue.localeCompare(bValue)
-        : bValue.localeCompare(aValue);
-    }
-    
-    if (typeof aValue === 'number' && typeof bValue === 'number') {
-      return filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
-    }
-    
-    return 0;
-  });
+  // Get unique chromosomes for filter
+  const chromosomes = [...new Set(groups.map(g => g.chromosome))].sort((a, b) => a - b);
 
   return (
     <div className="space-y-4">
@@ -135,7 +87,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search by match name or surnames..."
+            placeholder="Search by match name, surnames, or common ancestors..."
             value={filterOptions.searchTerm || ''}
             onChange={(e) => handleFilterChange('searchTerm', e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -295,7 +247,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
 
       {/* Results Count */}
       <div className="text-sm text-gray-600">
-        Showing {sortedGroups.length} of {groups.length} triangulation groups
+        Showing {filteredGroupsCount} of {groups.length} triangulation groups
       </div>
 
       {/* Annotation Editor */}

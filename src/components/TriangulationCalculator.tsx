@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Upload, FileText, Search, Download, AlertCircle, CheckCircle2, Settings, TreePine } from 'lucide-react';
 import { FileUpload } from './FileUpload';
 import { TriangulationResults } from './TriangulationResults';
@@ -15,6 +15,7 @@ import {
   GenealogicalTree
 } from '../types/triangulation';
 import { parseGEDCOM } from '../utils/gedcomParser';
+import { extractGenerationNumber } from '../utils/relationshipPredictor';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7,
@@ -45,6 +46,87 @@ export const TriangulationCalculator: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [nameIssuesWarning, setNameIssuesWarning] = useState<string | null>(null);
+
+  // Filter and sort triangulation groups
+  const filteredAndSortedGroups = useMemo(() => {
+    let filtered = triangulationGroups.filter(group => {
+      // Chromosome filter
+      if (filterOptions.chromosome && group.chromosome !== filterOptions.chromosome) return false;
+      
+      // Size filters
+      if (filterOptions.minSize && group.averageSize < filterOptions.minSize) return false;
+      if (filterOptions.maxSize && group.averageSize > filterOptions.maxSize) return false;
+      
+      // Match count filters
+      if (filterOptions.minMatches && group.matches.length < filterOptions.minMatches) return false;
+      if (filterOptions.maxMatches && group.matches.length > filterOptions.maxMatches) return false;
+      
+      // Confidence filter
+      if (filterOptions.confidenceThreshold && group.confidenceScore < filterOptions.confidenceThreshold) return false;
+      
+      // Cousin level filter
+      if (filterOptions.cousinLevel && (!group.relationshipPrediction || !group.relationshipPrediction.relationship.includes(filterOptions.cousinLevel))) return false;
+      
+      // Generation filter
+      if (filterOptions.generation && group.relationshipPrediction) {
+        const groupGeneration = extractGenerationNumber(group.relationshipPrediction.relationship);
+        if (groupGeneration !== filterOptions.generation) return false;
+      }
+      
+      // Search term filter
+      if (filterOptions.searchTerm) {
+        const searchLower = filterOptions.searchTerm.toLowerCase();
+        const hasMatch = group.matches.some(match => 
+          match.matchName.toLowerCase().includes(searchLower)
+        ) || group.annotations?.surnames?.some(surname => 
+          surname.toLowerCase().includes(searchLower)
+        ) || group.surnames?.some(surname => 
+          surname.toLowerCase().includes(searchLower)
+        ) || group.commonAncestors?.some(ancestor =>
+          ancestor.toLowerCase().includes(searchLower)
+        );
+        if (!hasMatch) return false;
+      }
+      
+      return true;
+    });
+
+    // Sort the filtered results
+    filtered.sort((a, b) => {
+      if (filterOptions.sortBy === 'commonAncestors') {
+        // Sort by first common ancestor alphabetically
+        const aAncestor = a.commonAncestors && a.commonAncestors.length > 0 ? a.commonAncestors[0] : '';
+        const bAncestor = b.commonAncestors && b.commonAncestors.length > 0 ? b.commonAncestors[0] : '';
+        
+        return filterOptions.sortOrder === 'asc' 
+          ? aAncestor.localeCompare(bAncestor)
+          : bAncestor.localeCompare(aAncestor);
+      }
+      
+      if (filterOptions.sortBy === 'matches') {
+        const aValue = a.matches.length;
+        const bValue = b.matches.length;
+        return filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+      }
+      
+      const aValue = a[filterOptions.sortBy];
+      const bValue = b[filterOptions.sortBy];
+      
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return filterOptions.sortOrder === 'asc' 
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+      
+      if (typeof aValue === 'number' && typeof bValue === 'number') {
+        return filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+      }
+      
+      return 0;
+    });
+
+    return filtered;
+  }, [triangulationGroups, filterOptions]);
 
   const handleFilesUploaded = useCallback(async (files: File[]) => {
     setUploadedFiles(files);
@@ -193,12 +275,17 @@ Please check that your CSV files contain:
     }
   }, []);
 
-  // Pagination
+  const handleFilterChange = useCallback((newFilterOptions: FilterOptions) => {
+    setFilterOptions(newFilterOptions);
+    setCurrentPage(1); // Reset to first page when filters change
+  }, []);
+
+  // Pagination based on filtered results
   const itemsPerPage = settings.maxResultsPerPage;
-  const totalPages = Math.ceil(triangulationGroups.length / itemsPerPage);
+  const totalPages = Math.ceil(filteredAndSortedGroups.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const currentGroups = triangulationGroups.slice(startIndex, endIndex);
+  const currentGroupsForDisplay = filteredAndSortedGroups.slice(startIndex, endIndex);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl">
@@ -387,26 +474,27 @@ Please check that your CSV files contain:
             <FilterAndAnnotation
               groups={triangulationGroups}
               filterOptions={filterOptions}
-              onFilterChange={setFilterOptions}
+              onFilterChange={handleFilterChange}
               onAnnotationChange={handleAnnotationChange}
               selectedGroup={selectedGroup}
               onGroupSelect={setSelectedGroup}
+              filteredGroupsCount={filteredAndSortedGroups.length}
             />
           )}
 
           {/* Chromosome Browser */}
-          {triangulationGroups.length > 0 && (
+          {filteredAndSortedGroups.length > 0 && (
             <ChromosomeBrowser
-              groups={triangulationGroups}
+              groups={filteredAndSortedGroups}
               selectedGroup={selectedGroup}
               onGroupSelect={setSelectedGroup}
             />
           )}
 
           {/* Results */}
-          {triangulationGroups.length > 0 && (
+          {filteredAndSortedGroups.length > 0 && (
             <TriangulationResults 
-              groups={currentGroups}
+              groups={currentGroupsForDisplay}
               onAnnotationChange={handleAnnotationChange}
               selectedGroup={selectedGroup}
               onGroupSelect={setSelectedGroup}
