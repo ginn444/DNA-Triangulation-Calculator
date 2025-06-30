@@ -22,12 +22,12 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
   overlapThreshold: 0.5,
   enableRelationshipPrediction: true,
   enableConfidenceScoring: true,
-  enableCrossVerification: false,
+  enableCrossVerification: true,
   maxResultsPerPage: 200
 };
 
 const DEFAULT_FILTERS: FilterOptions = {
-  sortBy: 'chromosome',
+  sortBy: 'commonAncestors',
   sortOrder: 'asc'
 };
 

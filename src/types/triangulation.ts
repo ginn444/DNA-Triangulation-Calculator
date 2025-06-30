@@ -84,7 +84,7 @@ export interface FilterOptions {
   cousinLevel?: string;
   generation?: number;
   searchTerm?: string;
-  sortBy: 'chromosome' | 'size' | 'matches' | 'confidence' | 'startPosition';
+  sortBy: 'chromosome' | 'averageSize' | 'matches' | 'confidenceScore' | 'startPosition' | 'commonAncestors';
   sortOrder: 'asc' | 'desc';
 }
 

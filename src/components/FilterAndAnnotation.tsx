@@ -87,6 +87,16 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
   });
 
   const sortedGroups = [...filteredGroups].sort((a, b) => {
+    if (filterOptions.sortBy === 'commonAncestors') {
+      // Sort by first common ancestor alphabetically
+      const aAncestor = a.commonAncestors && a.commonAncestors.length > 0 ? a.commonAncestors[0] : '';
+      const bAncestor = b.commonAncestors && b.commonAncestors.length > 0 ? b.commonAncestors[0] : '';
+      
+      return filterOptions.sortOrder === 'asc' 
+        ? aAncestor.localeCompare(bAncestor)
+        : bAncestor.localeCompare(aAncestor);
+    }
+    
     const aValue = a[filterOptions.sortBy];
     const bValue = b[filterOptions.sortBy];
     
@@ -271,6 +281,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
             <option value="matches">Matches</option>
             <option value="confidenceScore">Confidence</option>
             <option value="startPosition">Start Position</option>
+            <option value="commonAncestors">Suggested Common Ancestor</option>
           </select>
           
           <button
