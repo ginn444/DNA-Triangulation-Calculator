@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
   enableRelationshipPrediction: true,
   enableConfidenceScoring: true,
   enableCrossVerification: false,
-  maxResultsPerPage: 25
+  maxResultsPerPage: 200
 };
 
 const DEFAULT_FILTERS: FilterOptions = {
@@ -153,10 +153,10 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Notes,Surnames,Locations,Tags,Tree Matches,Common Ancestors',
+      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Surnames,Locations,Tags,Common Ancestors',
       ...triangulationGroups.flatMap((group, groupIndex) =>
         group.matches.map(match =>
-          `${groupIndex + 1},"${match.matchName}","${match.sourceFile || 'N/A'}",${match.chromosome},${match.startPosition},${match.endPosition},${match.sizeCM.toFixed(2)},${match.matchingSNPs || 'N/A'},"${match.yHaplogroup || 'N/A'}","${match.mtHaplogroup || 'N/A'}",${group.matches.length},${group.confidenceScore || 'N/A'},"${group.relationshipPrediction?.relationship || 'N/A'}","${group.annotations?.notes || match.notes || ''}","${group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || ''}","${group.annotations?.locations?.join('; ') || match.locations?.join('; ') || ''}","${group.annotations?.tags?.join('; ') || ''}","${group.treeMatches?.map(tm => tm.treeIndividuals.join(', ')).join('; ') || ''}","${group.commonAncestors?.join('; ') || ''}"`
+          `${groupIndex + 1},"${match.matchName}","${match.sourceFile || 'N/A'}",${match.chromosome},${match.startPosition},${match.endPosition},${match.sizeCM.toFixed(2)},${match.matchingSNPs || 'N/A'},"${match.yHaplogroup || 'N/A'}","${match.mtHaplogroup || 'N/A'}",${group.matches.length},${group.confidenceScore || 'N/A'},"${group.relationshipPrediction?.relationship || 'N/A'}","${group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || ''}","${group.annotations?.locations?.join('; ') || match.locations?.join('; ') || ''}","${group.annotations?.tags?.join('; ') || ''}","${group.commonAncestors?.join('; ') || ''}"`
         )
       )
     ].join('\n');
