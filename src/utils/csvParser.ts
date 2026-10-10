@@ -51,51 +51,11 @@ export const parseCSV = async (file: File): Promise<CSVRow[]> => {
     
     reader.onload = (event) => {
       try {
-        const text = event.target?.result as string;
-        const rows = text.trim().split('\n');
-        
-        if (rows.length < 2) {
-          reject(new Error(`File ${file.name} appears to be empty or has no data rows`));
-          return;
-        }
-
-        // Parse header
-        const rawHeaders = parseCSVRow(rows[0]);
-        console.log(`File ${file.name} - Raw headers:`, rawHeaders);
-        
-        // Create header mapping for this file with enhanced name detection
-        const headerMapping = createEnhancedHeaderMapping(rawHeaders);
-        console.log(`File ${file.name} - Header mapping:`, headerMapping);
-        
-        // Parse data rows
-        const data: CSVRow[] = [];
-        for (let i = 1; i < rows.length; i++) {
-          const row = rows[i].trim();
-          if (row) {
-            const values = parseCSVRow(row);
-            if (values.length === rawHeaders.length) {
-              const rowData: CSVRow = {};
-              
-              // Map values using the header mapping
-              rawHeaders.forEach((header, index) => {
-                const mappedKey = headerMapping[header];
-                if (mappedKey) {
-                  rowData[mappedKey] = values[index]?.trim() || '';
-                } else {
-                  // Keep original header for unmapped fields
-                  rowData[header.trim()] = values[index]?.trim() || '';
-                }
-              });
-              
-              data.push(rowData);
-            }
-          }
-        }
-        
-        console.log(`File ${file.name} - Parsed ${data.length} rows`);
-        resolve(data);
+        resolve(parseCSVText(event.target?.result as string, file.name));
       } catch (error) {
-        reject(new Error(`Error parsing CSV file ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        reject(error instanceof Error && error.message.startsWith(`File ${file.name}`)
+          ? error
+          : new Error(`Error parsing CSV file ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`));
       }
     };
     
@@ -105,6 +65,49 @@ export const parseCSV = async (file: File): Promise<CSVRow[]> => {
     
     reader.readAsText(file);
   });
+};
+
+// Strips a UTF-8 byte order mark (added by Excel) and surrounding whitespace,
+// including the carriage return left on each line of Windows (CRLF) files
+const cleanHeader = (header: string): string => header.replace(/^\uFEFF/, '').trim();
+
+export const parseCSVText = (text: string, fileName: string): CSVRow[] => {
+  const rows = text.trim().split(/\r?\n/);
+  
+  if (rows.length < 2) {
+    throw new Error(`File ${fileName} appears to be empty or has no data rows`);
+  }
+
+  // Parse header
+  const rawHeaders = parseCSVRow(rows[0]).map(cleanHeader);
+  console.log(`File ${fileName} - Raw headers:`, rawHeaders);
+  
+  // Create header mapping for this file with enhanced name detection
+  const headerMapping = createEnhancedHeaderMapping(rawHeaders);
+  console.log(`File ${fileName} - Header mapping:`, headerMapping);
+  
+  // Parse data rows
+  const data: CSVRow[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i].trim();
+    if (row) {
+      const values = parseCSVRow(row);
+      if (values.length === rawHeaders.length) {
+        const rowData: CSVRow = {};
+        
+        // Map values using the header mapping, keeping the original header for unmapped fields
+        rawHeaders.forEach((header, index) => {
+          const mappedKey = headerMapping[header] || header;
+          rowData[mappedKey] = values[index]?.trim() || '';
+        });
+        
+        data.push(rowData);
+      }
+    }
+  }
+  
+  console.log(`File ${fileName} - Parsed ${data.length} rows`);
+  return data;
 };
 
 const createEnhancedHeaderMapping = (headers: string[]): Record<string, string> => {
@@ -220,7 +223,7 @@ export const getDetectedHeaders = (file: File): Promise<string[]> => {
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const rows = text.trim().split('\n');
+        const rows = text.trim().split(/\r?\n/);
         
         if (rows.length === 0) {
           reject(new Error('File is empty'));
@@ -228,7 +231,7 @@ export const getDetectedHeaders = (file: File): Promise<string[]> => {
         }
 
         const headers = parseCSVRow(rows[0]);
-        resolve(headers.map(h => h.trim()));
+        resolve(headers.map(cleanHeader));
       } catch (error) {
         reject(new Error(`Error reading headers: ${error instanceof Error ? error.message : 'Unknown error'}`));
       }

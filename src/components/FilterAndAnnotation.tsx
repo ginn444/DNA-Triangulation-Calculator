@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Filter, Search, Tag, MapPin, Users, Edit3, Save, X } from 'lucide-react';
+import { Filter, Search, Edit3, Save, X } from 'lucide-react';
 import { FilterOptions, TriangulationGroup, GroupAnnotation } from '../types/triangulation';
-import { extractGenerationNumber } from '../utils/relationshipPredictor';
 
 interface FilterAndAnnotationProps {
   groups: TriangulationGroup[];
@@ -19,7 +18,6 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
   onFilterChange,
   onAnnotationChange,
   selectedGroup,
-  onGroupSelect,
   filteredGroupsCount
 }) => {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -29,7 +27,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
   const [annotationLocations, setAnnotationLocations] = useState('');
   const [annotationTags, setAnnotationTags] = useState('');
 
-  const handleFilterChange = (key: keyof FilterOptions, value: any) => {
+  const handleFilterChange = <K extends keyof FilterOptions>(key: K, value: FilterOptions[K]) => {
     onFilterChange({
       ...filterOptions,
       [key]: value
@@ -42,7 +40,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
       surnames: annotationSurnames ? annotationSurnames.split(',').map(s => s.trim()) : undefined,
       locations: annotationLocations ? annotationLocations.split(',').map(l => l.trim()) : undefined,
       tags: annotationTags ? annotationTags.split(',').map(t => t.trim()) : undefined,
-      researchStatus: 'pending',
+      researchStatus: groups.find(g => g.id === groupId)?.annotations?.researchStatus || 'pending',
       lastModified: new Date()
     };
 
@@ -55,15 +53,14 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
   };
 
   const startEditing = (group: TriangulationGroup) => {
-    setEditingGroup(group.chromosome);
+    setEditingGroup(group.id);
     setAnnotationText(group.annotations?.notes || '');
     setAnnotationSurnames(group.annotations?.surnames?.join(', ') || '');
     setAnnotationLocations(group.annotations?.locations?.join(', ') || '');
     setAnnotationTags(group.annotations?.tags?.join(', ') || '');
   };
 
-  // Get unique chromosomes for filter
-  const chromosomes = [...new Set(groups.map(g => g.chromosome))].sort((a, b) => a - b);
+  const selected = selectedGroup !== undefined ? groups.find(g => g.id === selectedGroup) : undefined;
 
   return (
     <div className="space-y-4">
@@ -106,7 +103,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
               >
                 <option value="">All</option>
                 {Array.from({ length: 23 }, (_, i) => i + 1).map(chr => (
-                  <option key={chr} value={chr}>{chr}</option>
+                  <option key={chr} value={chr}>{chr === 23 ? 'X' : chr}</option>
                 ))}
               </select>
             </div>
@@ -225,7 +222,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
           <label className="text-sm font-medium text-gray-700">Sort by:</label>
           <select
             value={filterOptions.sortBy}
-            onChange={(e) => handleFilterChange('sortBy', e.target.value as any)}
+            onChange={(e) => handleFilterChange('sortBy', e.target.value as FilterOptions['sortBy'])}
             className="px-3 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="chromosome">Chromosome</option>
@@ -248,13 +245,22 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
       {/* Results Count */}
       <div className="text-sm text-gray-600">
         Showing {filteredGroupsCount} of {groups.length} triangulation groups
+        {selected && editingGroup === null && (
+          <button
+            onClick={() => startEditing(selected)}
+            className="ml-3 inline-flex items-center text-blue-600 hover:text-blue-800 font-medium"
+          >
+            <Edit3 className="w-4 h-4 mr-1" />
+            {selected.annotations ? 'Edit' : 'Add'} research notes for group {selected.id + 1}
+          </button>
+        )}
       </div>
 
       {/* Annotation Editor */}
       {editingGroup !== null && (
         <div className="bg-white rounded-lg shadow-lg p-4 border-2 border-blue-200">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold text-gray-800">Edit Annotation</h4>
+            <h4 className="text-lg font-semibold text-gray-800">Research Notes: Group {editingGroup + 1}</h4>
             <button
               onClick={() => setEditingGroup(null)}
               className="text-gray-500 hover:text-gray-700"

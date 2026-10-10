@@ -1,4 +1,3 @@
-import React from 'react';
 import { TriangulationCalculator } from './components/TriangulationCalculator';
 
 function App() {

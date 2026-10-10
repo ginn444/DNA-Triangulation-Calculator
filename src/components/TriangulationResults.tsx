@@ -1,17 +1,15 @@
 import React, { useState } from 'react';
-import { Users, MapPin, TrendingUp, Filter, ChevronDown, ChevronUp, Edit3, Tag, Star, TreePine, Dna, FileText } from 'lucide-react';
-import { TriangulationGroup, GroupAnnotation } from '../types/triangulation';
+import { Users, MapPin, TrendingUp, ChevronDown, ChevronUp, Tag, Star, TreePine, Dna, FileText } from 'lucide-react';
+import { TriangulationGroup } from '../types/triangulation';
 
 interface TriangulationResultsProps {
   groups: TriangulationGroup[];
-  onAnnotationChange?: (groupId: number, annotation: GroupAnnotation) => void;
   selectedGroup?: number;
   onGroupSelect?: (groupId: number) => void;
 }
 
 export const TriangulationResults: React.FC<TriangulationResultsProps> = ({ 
   groups,
-  onAnnotationChange,
   selectedGroup,
   onGroupSelect
 }) => {
@@ -99,7 +97,8 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
         </div>
         
         <div className="divide-y divide-gray-100">
-          {groups.map((group, groupIndex) => {
+          {groups.map(group => {
+            const groupIndex = group.id;
             const isExpanded = expandedGroups.has(groupIndex);
             const isSelected = selectedGroup === groupIndex;
             
@@ -128,7 +127,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                     </div>
                     <div>
                       <div className="font-semibold text-gray-800">
-                        Chromosome {group.chromosome}
+                        Chromosome {group.chromosome === 23 ? 'X' : group.chromosome}
                       </div>
                       <div className="text-sm text-gray-600">
                         {group.matches.length} matches • {group.averageSize.toFixed(1)} cM avg • 
@@ -148,7 +147,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                         {group.totalSize.toFixed(1)} cM
                       </div>
                       <div className="text-xs text-gray-500">Total Size</div>
-                      {group.confidenceScore && (
+                      {group.confidenceScore > 0 && (
                         <div className="text-xs text-orange-600 font-medium">
                           {group.confidenceScore}% confidence
                         </div>

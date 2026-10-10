@@ -1,7 +1,6 @@
 import { DNAMatch, TriangulationGroup, CSVRow, TriangulationSettings, GenealogicalTree, TreeMatchInfo } from '../types/triangulation';
 import { parseCSV } from './csvParser';
 import { predictRelationship, calculateConfidenceScore } from './relationshipPredictor';
-import { extractSurnames, findCommonAncestors } from './gedcomParser';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7, // 7 cM minimum
@@ -191,7 +190,7 @@ const populateDNAMatchTreeInfo = (match: DNAMatch, genealogicalTree: Genealogica
   match.treeMatchInfo = treeMatches.length > 0 ? treeMatches : undefined;
 };
 
-const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (message: string) => void): DNAMatch[] => {
+export const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (message: string) => void = () => {}): DNAMatch[] => {
   onProgress('Building canonicalization map...');
   
   // Step 1: Build canonicalization map
@@ -218,8 +217,16 @@ const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (mess
     
     const profile = profileMap.get(canonicalName)!;
     
-    // Add this segment to the profile
-    profile.segments.push(match);
+    // Add this segment to the profile, skipping exact duplicates (the same
+    // segment exported in more than one file would otherwise be counted twice)
+    const isDuplicateSegment = profile.segments.some(existing =>
+      existing.chromosome === match.chromosome &&
+      existing.startPosition === match.startPosition &&
+      existing.endPosition === match.endPosition
+    );
+    if (!isDuplicateSegment) {
+      profile.segments.push(match);
+    }
     profile.nameVariations.add(match.matchName);
     profile.sourceFiles.add(match.sourceFile);
     
@@ -277,7 +284,7 @@ const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (mess
   return enrichedMatches;
 };
 
-const canonicalizeName = (name: string): string => {
+export const canonicalizeName = (name: string): string => {
   if (!name) return '';
   
   // Basic canonicalization: lowercase, trim, remove extra spaces
@@ -305,7 +312,7 @@ const canonicalizeName = (name: string): string => {
   return canonical;
 };
 
-const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: TriangulationSettings): { matches: DNAMatch[], issues: string[] } => {
+export const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: TriangulationSettings): { matches: DNAMatch[], issues: string[] } => {
   const matches: DNAMatch[] = [];
   const issues: string[] = [];
   
@@ -381,7 +388,7 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
       
       // Get chromosome - try standardized field first
       const chromosomeField = row['chromosome'] || row['Chromosome'];
-      const chromosome = parseInt(chromosomeField?.trim());
+      const chromosome = parseChromosome(chromosomeField);
       
       // Get start position - try standardized field first
       const startField = row['startPosition'] || row['Start Location'] || row['Start Position'];
@@ -448,10 +455,10 @@ const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, settings: Tria
   return { matches, issues };
 };
 
-const findTriangulations = (
+export const findTriangulations = (
   matches: DNAMatch[], 
   settings: TriangulationSettings,
-  onProgress: (message: string) => void,
+  onProgress: (message: string) => void = () => {},
   genealogicalTree: GenealogicalTree | null = null
 ): TriangulationGroup[] => {
   onProgress('Grouping segments by chromosome...');
@@ -502,6 +509,11 @@ const findTriangulations = (
     return a.startPosition - b.startPosition;
   });
   
+  // Assign stable IDs so selection and annotations survive filtering, sorting and paging
+  finalGroups.forEach((group, index) => {
+    group.id = index;
+  });
+  
   return finalGroups;
 };
 
@@ -540,7 +552,7 @@ const splitGroupsBySingleCommonAncestor = (
       const uniqueMatches = Array.from(new Set(matchesForAncestor));
       
       // Only create group if it meets minimum match requirements
-      if (uniqueMatches.length >= settings.minimumMatches) {
+      if (countDistinctPeople(uniqueMatches) >= settings.minimumMatches) {
         // Calculate the overlapping region for this subset
         const startPosition = Math.max(...uniqueMatches.map(m => m.startPosition));
         const endPosition = Math.min(...uniqueMatches.map(m => m.endPosition));
@@ -561,6 +573,7 @@ const splitGroupsBySingleCommonAncestor = (
           }
           
           const newGroup: TriangulationGroup = {
+            id: 0, // Assigned after sorting
             chromosome: initialGroup.chromosome,
             startPosition,
             endPosition,
@@ -597,66 +610,84 @@ const findTriangulationsOnChromosome = (
     const baseMatch = matches[i];
     const overlappingMatches = [baseMatch];
     const overlappingIndices = [i];
+    const people = new Set([canonicalizeName(baseMatch.matchName)]);
     
-    // Find all matches that overlap with the base match
+    // The region shared by every member of the group so far. Each new member
+    // is tested against this region (not just the base match) so that all
+    // members genuinely share the same stretch of DNA.
+    let regionStart = baseMatch.startPosition;
+    let regionEnd = baseMatch.endPosition;
+    
     for (let j = i + 1; j < matches.length; j++) {
       if (processedMatches.has(j)) continue;
       
       const testMatch = matches[j];
       
-      // If the test match starts after the base match ends, no more overlaps possible
-      if (testMatch.startPosition > baseMatch.endPosition) {
+      // If the test match starts after the shared region ends, no more overlaps possible
+      if (testMatch.startPosition >= regionEnd) {
         break;
       }
       
-      // Check if there's significant overlap
-      const overlapStart = Math.max(baseMatch.startPosition, testMatch.startPosition);
-      const overlapEnd = Math.min(baseMatch.endPosition, testMatch.endPosition);
+      // A person cannot triangulate with themselves
+      const person = canonicalizeName(testMatch.matchName);
+      if (people.has(person)) continue;
+      
+      const overlapStart = Math.max(regionStart, testMatch.startPosition);
+      const overlapEnd = Math.min(regionEnd, testMatch.endPosition);
       
       if (overlapEnd > overlapStart) {
         const overlapSize = overlapEnd - overlapStart;
-        const baseSize = baseMatch.endPosition - baseMatch.startPosition;
+        const regionSize = regionEnd - regionStart;
         const testSize = testMatch.endPosition - testMatch.startPosition;
-        const minSize = Math.min(baseSize, testSize);
+        const minSize = Math.min(regionSize, testSize);
         
         // Check if overlap is significant enough
         if (overlapSize / minSize >= settings.overlapThreshold) {
           overlappingMatches.push(testMatch);
           overlappingIndices.push(j);
+          people.add(person);
+          regionStart = overlapStart;
+          regionEnd = overlapEnd;
         }
       }
     }
     
-    // If we have enough matches for triangulation, create a group
-    if (overlappingMatches.length >= settings.minimumMatches) {
-      // Calculate the overlapping region
-      const startPosition = Math.max(...overlappingMatches.map(m => m.startPosition));
-      const endPosition = Math.min(...overlappingMatches.map(m => m.endPosition));
+    // If we have enough distinct people for triangulation, create a group
+    if (people.size >= settings.minimumMatches) {
+      const totalSize = overlappingMatches.reduce((sum, match) => sum + match.sizeCM, 0);
+      const averageSize = totalSize / overlappingMatches.length;
       
-      if (endPosition > startPosition) {
-        const totalSize = overlappingMatches.reduce((sum, match) => sum + match.sizeCM, 0);
-        const averageSize = totalSize / overlappingMatches.length;
-        
-        // Create the triangulation group
-        const group: TriangulationGroup = {
-          chromosome: baseMatch.chromosome,
-          startPosition,
-          endPosition,
-          matches: overlappingMatches,
-          averageSize,
-          totalSize,
-          confidenceScore: 0 // Will be calculated later
-        };
-        
-        triangulationGroups.push(group);
-        
-        // Mark these matches as processed
-        overlappingIndices.forEach(index => processedMatches.add(index));
-      }
+      triangulationGroups.push({
+        id: 0, // Assigned after sorting
+        chromosome: baseMatch.chromosome,
+        startPosition: regionStart,
+        endPosition: regionEnd,
+        matches: overlappingMatches,
+        averageSize,
+        totalSize,
+        confidenceScore: 0 // Will be calculated later
+      });
+      
+      // Mark these matches as processed
+      overlappingIndices.forEach(index => processedMatches.add(index));
     }
   }
   
   return triangulationGroups;
+};
+
+const countDistinctPeople = (matches: DNAMatch[]): number =>
+  new Set(matches.map(match => canonicalizeName(match.matchName))).size;
+
+/**
+ * Parses a chromosome value such as "7", "chr7", "X" or "chrX".
+ * The X chromosome is represented as 23.
+ */
+export const parseChromosome = (value: string | undefined): number => {
+  if (!value) return NaN;
+  const normalized = value.trim().toUpperCase().replace(/^CHR(OMOSOME)?\s*/, '');
+  if (normalized === 'X') return 23;
+  return /^\d+$/.test(normalized) ? parseInt(normalized, 10) : NaN;
 };
 
 const extractSurnamesFromName = (name: string): string[] => {
