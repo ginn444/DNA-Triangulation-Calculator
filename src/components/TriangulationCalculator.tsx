@@ -1,11 +1,12 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { Upload, FileText, Search, Download, AlertCircle, CheckCircle2, Settings, TreePine } from 'lucide-react';
+import { Upload, FileText, Search, Download, AlertCircle, CheckCircle2, TreePine } from 'lucide-react';
 import { FileUpload } from './FileUpload';
 import { TriangulationResults } from './TriangulationResults';
 import { SettingsPanel } from './SettingsPanel';
 import { FilterAndAnnotation } from './FilterAndAnnotation';
 import { ChromosomeBrowser } from './ChromosomeBrowser';
 import { processTriangulation } from '../utils/triangulationEngine';
+import { getDetectedHeaders } from '../utils/csvParser';
 import { 
   TriangulationGroup, 
   ProcessingStatus, 
@@ -32,6 +33,9 @@ const DEFAULT_FILTERS: FilterOptions = {
   sortOrder: 'asc'
 };
 
+// Quotes a value for CSV output, escaping embedded quotes
+const csvEscape = (value: string | number): string => `"${String(value).replace(/"/g, '""')}"`;
+
 export const TriangulationCalculator: React.FC = () => {
   const [triangulationGroups, setTriangulationGroups] = useState<TriangulationGroup[]>([]);
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>('idle');
@@ -49,7 +53,7 @@ export const TriangulationCalculator: React.FC = () => {
 
   // Filter and sort triangulation groups
   const filteredAndSortedGroups = useMemo(() => {
-    let filtered = triangulationGroups.filter(group => {
+    const filtered = triangulationGroups.filter(group => {
       // Chromosome filter
       if (filterOptions.chromosome && group.chromosome !== filterOptions.chromosome) return false;
       
@@ -111,18 +115,7 @@ export const TriangulationCalculator: React.FC = () => {
       
       const aValue = a[filterOptions.sortBy];
       const bValue = b[filterOptions.sortBy];
-      
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return filterOptions.sortOrder === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
-      
-      if (typeof aValue === 'number' && typeof bValue === 'number') {
-        return filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
-      }
-      
-      return 0;
+      return filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
     });
 
     return filtered;
@@ -138,21 +131,12 @@ export const TriangulationCalculator: React.FC = () => {
     
     // Try to read headers from the first file to show users what was found
     if (files.length > 0) {
-      try {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const text = event.target?.result as string;
-          const firstLine = text.split('\n')[0];
-          if (firstLine) {
-            const headers = firstLine.split(',').map(h => h.trim().replace(/"/g, ''));
-            setCsvHeaders(headers);
-            console.log('Headers found in CSV:', headers);
-          }
-        };
-        reader.readAsText(files[0]);
-      } catch (error) {
-        console.warn('Could not read CSV headers for preview:', error);
-      }
+      getDetectedHeaders(files[0])
+        .then(headers => {
+          setCsvHeaders(headers);
+          console.log('Headers found in CSV:', headers);
+        })
+        .catch(error => console.warn('Could not read CSV headers for preview:', error));
     }
   }, []);
 
@@ -166,6 +150,7 @@ export const TriangulationCalculator: React.FC = () => {
     setProcessingMessage('Reading uploaded files...');
     setError(null);
     setNameIssuesWarning(null);
+    setSelectedGroup(undefined);
 
     try {
       const results = await processTriangulation(
@@ -206,7 +191,7 @@ Please ensure your CSV files contain these column headers.`);
         setError(`No Valid Data Found: ${errorMessage}
 
 Please check that your CSV files contain:
-• Valid chromosome numbers (1-23)
+• Valid chromosome numbers (1-22, or X)
 • Valid position numbers (positive integers)
 • Valid cM values (at least ${settings.minimumSize} cM)
 • Proper data formatting`);
@@ -236,10 +221,26 @@ Please check that your CSV files contain:
 
     const csvContent = [
       'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Surnames,Locations,Tags,Common Ancestors',
-      ...triangulationGroups.flatMap((group, groupIndex) =>
-        group.matches.map(match =>
-          `${groupIndex + 1},"${match.matchName}","${match.sourceFile || 'N/A'}",${match.chromosome},${match.startPosition},${match.endPosition},${match.sizeCM.toFixed(2)},${match.matchingSNPs || 'N/A'},"${match.yHaplogroup || 'N/A'}","${match.mtHaplogroup || 'N/A'}",${group.matches.length},${group.confidenceScore || 'N/A'},"${group.relationshipPrediction?.relationship || 'N/A'}","${group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || ''}","${group.annotations?.locations?.join('; ') || match.locations?.join('; ') || ''}","${group.annotations?.tags?.join('; ') || ''}","${group.commonAncestors?.join('; ') || ''}"`
-        )
+      ...triangulationGroups.flatMap(group =>
+        group.matches.map(match => [
+          group.id + 1,
+          match.matchName,
+          match.sourceFile || 'N/A',
+          match.chromosome === 23 ? 'X' : match.chromosome,
+          match.startPosition,
+          match.endPosition,
+          match.sizeCM.toFixed(2),
+          match.matchingSNPs || 'N/A',
+          match.yHaplogroup || 'N/A',
+          match.mtHaplogroup || 'N/A',
+          group.matches.length,
+          group.confidenceScore || 'N/A',
+          group.relationshipPrediction?.relationship || 'N/A',
+          group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || '',
+          group.annotations?.locations?.join('; ') || match.locations?.join('; ') || '',
+          group.annotations?.tags?.join('; ') || '',
+          group.commonAncestors?.join('; ') || ''
+        ].map(csvEscape).join(','))
       )
     ].join('\n');
 
@@ -257,8 +258,8 @@ Please check that your CSV files contain:
 
   const handleAnnotationChange = useCallback((groupId: number, annotation: GroupAnnotation) => {
     setTriangulationGroups(prev => 
-      prev.map((group, index) => 
-        index === groupId 
+      prev.map(group => 
+        group.id === groupId 
           ? { ...group, annotations: annotation }
           : group
       )
@@ -270,7 +271,7 @@ Please check that your CSV files contain:
       const tree = await parseGEDCOM(file);
       setGenealogicalTree(tree);
       setProcessingMessage(`Loaded genealogical tree with ${tree.individuals.length} individuals`);
-    } catch (error) {
+    } catch {
       setError('Failed to parse GEDCOM file. Please ensure it\'s a valid GEDCOM format.');
     }
   }, []);
@@ -495,7 +496,6 @@ Please check that your CSV files contain:
           {filteredAndSortedGroups.length > 0 && (
             <TriangulationResults 
               groups={currentGroupsForDisplay}
-              onAnnotationChange={handleAnnotationChange}
               selectedGroup={selectedGroup}
               onGroupSelect={setSelectedGroup}
             />

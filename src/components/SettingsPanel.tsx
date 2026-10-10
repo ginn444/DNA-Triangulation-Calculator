@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Sliders, Eye, EyeOff, FileText, Users } from 'lucide-react';
+import { Settings, Sliders, Eye, FileText } from 'lucide-react';
 import { TriangulationSettings } from '../types/triangulation';
 
 interface SettingsPanelProps {
@@ -15,7 +15,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   isOpen,
   onToggle
 }) => {
-  const handleChange = (key: keyof TriangulationSettings, value: any) => {
+  const handleChange = <K extends keyof TriangulationSettings>(key: K, value: TriangulationSettings[K]) => {
     onSettingsChange({
       ...settings,
       [key]: value

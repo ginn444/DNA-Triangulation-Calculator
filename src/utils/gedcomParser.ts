@@ -80,7 +80,7 @@ export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
     } else if (level === 1) {
       if (currentIndividual) {
         switch (tag) {
-          case 'NAME':
+          case 'NAME': {
             const nameParts = value.split('/');
             const firstName = nameParts[0]?.trim() || '';
             const lastName = nameParts[1]?.trim() || '';
@@ -88,6 +88,7 @@ export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
             currentIndividual.name = `${firstName} ${lastName}`.trim();
             currentIndividual.surnames = surnames;
             break;
+          }
           case 'BIRT':
             // Birth event started
             break;

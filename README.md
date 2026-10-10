@@ -29,14 +29,16 @@ DNA triangulation is a genealogical technique that confirms shared ancestry by i
 
 ## 🚀 Live Demo
 
-Visit the live application: [https://sparkly-donut-ebb5f2.netlify.app](https://sparkly-donut-ebb5f2.netlify.app)
+Visit the live application: [https://ginn444.github.io/DNA-Triangulation-Calculator/](https://ginn444.github.io/DNA-Triangulation-Calculator/)
+
+Every push to `main` is deployed to GitHub Pages by `.github/workflows/pages.yml`.
 
 ## 📋 Supported CSV Formats
 
 The application automatically detects and processes CSV files from various sources:
 
 ### Required Columns (automatically detected)
-- **Chromosome**: Chromosome number (1-23)
+- **Chromosome**: Chromosome number (1-22, or X; `chr7`/`chrX` style values are accepted)
 - **Start Position**: Starting position of DNA segment
 - **End Position**: Ending position of DNA segment  
 - **Size/Overlap**: Segment size in centimorgans (cM)
@@ -59,13 +61,13 @@ The application automatically detects and processes CSV files from various sourc
 ## 🛠️ Installation & Development
 
 ### Prerequisites
-- Node.js 18+ 
+- Node.js 20.19+ (22 recommended)
 - npm or yarn
 
 ### Setup
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/dna-triangulation-calculator.git
+git clone https://github.com/ginn444/DNA-Triangulation-Calculator.git
 cd dna-triangulation-calculator
 
 # Install dependencies
@@ -73,6 +75,11 @@ npm install
 
 # Start development server
 npm run dev
+
+# Run the checks CI runs
+npm run lint
+npm run typecheck
+npm test
 
 # Build for production
 npm run build
@@ -99,7 +106,7 @@ npm run build
 ### 4. Analyze Results
 - Browse triangulation groups by chromosome
 - Use filters to focus on specific criteria
-- Add research notes and annotations
+- Select a group (in the list or the chromosome browser), then use **Add research notes** to record notes, surnames, locations and tags
 - Export results for external analysis
 
 ### 5. GEDCOM Integration (Optional)
@@ -114,6 +121,7 @@ npm run build
 - **Tailwind CSS** for styling
 - **Lucide React** for icons
 - **Vite** for build tooling
+- **Vitest** for unit tests
 
 ### Key Components
 - `TriangulationCalculator`: Main application component
@@ -131,10 +139,11 @@ npm run build
 ## 📊 Analysis Methodology
 
 ### Triangulation Detection
-1. **Segment Grouping**: Group DNA segments by chromosome
-2. **Overlap Calculation**: Identify overlapping regions between matches
-3. **Threshold Application**: Apply minimum size and overlap requirements
-4. **Group Formation**: Create triangulation groups with sufficient matches
+1. **Deduplication**: Merge name variants of the same person and drop identical segments exported in more than one file
+2. **Segment Grouping**: Group DNA segments by chromosome
+3. **Overlap Calculation**: Grow each group one match at a time, requiring every new member to overlap the region already shared by the whole group
+4. **Threshold Application**: Apply minimum size and overlap requirements
+5. **Group Formation**: Keep groups with enough *distinct people* (one person's multiple segments never count twice)
 
 ### Confidence Scoring
 Confidence scores are calculated based on:

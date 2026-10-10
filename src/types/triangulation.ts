@@ -27,6 +27,7 @@ export interface RelationshipPrediction {
 }
 
 export interface TriangulationGroup {
+  id: number; // Stable identifier, independent of filtering, sorting and paging
   chromosome: number;
   startPosition: number;
   endPosition: number;

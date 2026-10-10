@@ -1,20 +1,18 @@
 import React from 'react';
-import { TriangulationGroup, DNAMatch } from '../types/triangulation';
+import { TriangulationGroup } from '../types/triangulation';
 
 interface ChromosomeBrowserProps {
   groups: TriangulationGroup[];
   selectedGroup?: number;
   onGroupSelect?: (groupId: number) => void;
   width?: number;
-  height?: number;
 }
 
 export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
   groups,
   selectedGroup,
   onGroupSelect,
-  width = 800,
-  height = 400
+  width = 800
 }) => {
   const chromosomeHeight = 30;
   const margin = 20;
@@ -74,11 +72,12 @@ export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
           fontWeight="bold"
           fill="#374151"
         >
-          {chromosome}
+          {chromosome === 23 ? 'X' : chromosome}
         </text>
         
         {/* Segments */}
-        {groups.map((group, index) => {
+        {groups.map(group => {
+          const index = group.id;
           const startX = (group.startPosition / length) * chromosomeWidth;
           const endX = (group.endPosition / length) * chromosomeWidth;
           const segmentWidth = endX - startX;
@@ -122,7 +121,11 @@ export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
   const chromosomes = Array.from(groupsByChromosome.entries())
     .sort(([a], [b]) => a - b);
   
-  const totalHeight = chromosomes.length * (chromosomeHeight + 10) + margin * 2;
+  const selected = selectedGroup !== undefined ? groups.find(g => g.id === selectedGroup) : undefined;
+  
+  const rowsHeight = chromosomes.length * (chromosomeHeight + 10);
+  const legendY = margin + rowsHeight + 15;
+  const totalHeight = legendY + margin;
   
   return (
     <div className="bg-white rounded-lg shadow-lg p-4">
@@ -130,7 +133,7 @@ export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
       <div className="overflow-x-auto">
         <svg
           width={width}
-          height={Math.max(height, totalHeight)}
+          height={totalHeight}
           className="border border-gray-200 rounded"
         >
           {chromosomes.map(([chromosome, groups], index) => 
@@ -138,7 +141,7 @@ export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
           )}
           
           {/* Legend */}
-          <g transform={`translate(${margin}, ${totalHeight - 40})`}>
+          <g transform={`translate(${margin}, ${legendY})`}>
             <text x={0} y={0} fontSize={12} fontWeight="bold" fill="#374151">
               Legend:
             </text>
@@ -154,19 +157,17 @@ export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
         </svg>
       </div>
       
-      {selectedGroup !== undefined && (
+      {selected && (
         <div className="mt-4 p-3 bg-blue-50 rounded-lg">
           <h4 className="font-medium text-blue-800 mb-2">
-            Selected Group {selectedGroup + 1}
+            Selected Group {selected.id + 1}
           </h4>
-          {groups[selectedGroup] && (
-            <div className="text-sm text-blue-700">
-              <p>Chromosome {groups[selectedGroup].chromosome}</p>
-              <p>{groups[selectedGroup].matches.length} matches</p>
-              <p>Average size: {groups[selectedGroup].averageSize.toFixed(1)} cM</p>
-              <p>Confidence: {groups[selectedGroup].confidenceScore}%</p>
-            </div>
-          )}
+          <div className="text-sm text-blue-700">
+            <p>Chromosome {selected.chromosome === 23 ? 'X' : selected.chromosome}</p>
+            <p>{selected.matches.length} matches</p>
+            <p>Average size: {selected.averageSize.toFixed(1)} cM</p>
+            <p>Confidence: {selected.confidenceScore}%</p>
+          </div>
         </div>
       )}
     </div>
