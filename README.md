@@ -29,7 +29,9 @@ DNA triangulation is a genealogical technique that confirms shared ancestry by i
 
 ## 🚀 Live Demo
 
-Visit the live application: [https://sparkly-donut-ebb5f2.netlify.app](https://sparkly-donut-ebb5f2.netlify.app)
+Visit the live application: [https://ginn444.github.io/DNA-Triangulation-Calculator/](https://ginn444.github.io/DNA-Triangulation-Calculator/)
+
+Every push to `main` is deployed to GitHub Pages by `.github/workflows/pages.yml`.
 
 ## 📋 Supported CSV Formats
 
