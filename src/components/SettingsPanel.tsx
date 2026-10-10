@@ -176,6 +176,32 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </div>
                 <span className="text-sm text-gray-700">Cross-Verification with Family Trees</span>
               </label>
+
+              <label className="flex items-start cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.separateByLineage}
+                  onChange={(e) => handleChange('separateByLineage', e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`w-5 h-5 rounded border-2 mr-3 mt-0.5 flex-shrink-0 flex items-center justify-center ${
+                  settings.separateByLineage 
+                    ? 'bg-blue-600 border-blue-600' 
+                    : 'border-gray-300'
+                }`}>
+                  {settings.separateByLineage && (
+                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                </div>
+                <span className="text-sm text-gray-700">
+                  Separate Groups by Lineage
+                  <span className="block text-xs text-gray-500">
+                    Never group matches tagged to different branches (e.g. Dad's dad vs. Dad's mom)
+                  </span>
+                </span>
+              </label>
             </div>
           </div>
 
@@ -214,6 +240,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   enableRelationshipPrediction: true,
                   enableConfidenceScoring: true,
                   enableCrossVerification: false,
+                  separateByLineage: true,
                   maxResultsPerPage: 25
                 };
                 onSettingsChange(defaultSettings);

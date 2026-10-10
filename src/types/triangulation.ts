@@ -17,6 +17,8 @@ export interface DNAMatch {
   notes?: string;
   // Tree match information for this specific DNA match
   treeMatchInfo?: TreeMatchInfo[];
+  // Lineage path tagged by the user, e.g. "PPM" = father's father's mother (see utils/lineage.ts)
+  lineage?: string;
 }
 
 export interface RelationshipPrediction {
@@ -42,6 +44,9 @@ export interface TriangulationGroup {
   surnames?: string[];
   // Genealogical tree integration
   treeMatches?: TreeMatchInfo[];
+  // Most specific lineage shared by the tagged members, and whether members disagree
+  lineage?: string;
+  lineageConflict?: boolean;
 }
 
 export interface TreeMatchInfo {
@@ -74,6 +79,7 @@ export interface TriangulationSettings {
   enableRelationshipPrediction: boolean;
   enableConfidenceScoring: boolean;
   enableCrossVerification: boolean;
+  separateByLineage: boolean; // Never group matches tagged with conflicting lineages
   maxResultsPerPage: number;
 }
 
@@ -87,6 +93,8 @@ export interface FilterOptions {
   cousinLevel?: string;
   generation?: number;
   searchTerm?: string;
+  // A lineage path to show (that branch and deeper), or 'untagged' / 'conflict'
+  lineage?: string;
   sortBy: 'chromosome' | 'averageSize' | 'matches' | 'confidenceScore' | 'startPosition' | 'commonAncestors';
   sortOrder: 'asc' | 'desc';
 }

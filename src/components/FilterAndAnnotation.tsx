@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Filter, Search, Edit3, Save, X } from 'lucide-react';
 import { FilterOptions, TriangulationGroup, GroupAnnotation } from '../types/triangulation';
+import { LINEAGE_OPTIONS, describeLineage } from '../utils/lineage';
 
 interface FilterAndAnnotationProps {
   groups: TriangulationGroup[];
@@ -165,6 +166,24 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
                 <option value="6th Cousin">6th Cousin</option>
                 <option value="7th Cousin">7th Cousin</option>
                 <option value="8th Cousin">8th Cousin</option>
+              </select>
+            </div>
+
+            {/* Lineage Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Lineage</label>
+              <select
+                value={filterOptions.lineage || ''}
+                onChange={(e) => handleFilterChange('lineage', e.target.value || undefined)}
+                title="Shows the chosen line and everything further back on it (PP includes PPP and PPM)"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All</option>
+                <option value="untagged">Untagged groups</option>
+                <option value="conflict">Mixed lineage</option>
+                {LINEAGE_OPTIONS.map(paths => paths.map(path => (
+                  <option key={path} value={path}>{path} · {describeLineage(path)}</option>
+                )))}
               </select>
             </div>
 
