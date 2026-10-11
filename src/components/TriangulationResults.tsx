@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
 import { Users, MapPin, TrendingUp, ChevronDown, ChevronUp, Tag, Star, TreePine, Dna, FileText } from 'lucide-react';
-import { TriangulationGroup } from '../types/triangulation';
+import { GenealogicalTree, TriangulationGroup } from '../types/triangulation';
+import { TimeSpacePanel } from './TimeSpacePanel';
+import { TreeOwners } from '../utils/timeSpace';
+import { MAX_GENERATIONS } from '../utils/segmentAge';
 import { groupKey } from '../utils/triangulationEngine';
 import { LINEAGE_OPTIONS, describeLineage, lineageImpossibleOnX } from '../utils/lineage';
 
 interface TriangulationResultsProps {
   groups: TriangulationGroup[];
   onLineageChange?: (matchName: string, lineage: string) => void;
+  tree?: GenealogicalTree | null;
+  homeId?: string;
+  treeOwners?: TreeOwners;
   selectedGroup?: number;
   onGroupSelect?: (groupId: number) => void;
 }
@@ -14,6 +20,9 @@ interface TriangulationResultsProps {
 export const TriangulationResults: React.FC<TriangulationResultsProps> = ({ 
   groups,
   onLineageChange,
+  tree = null,
+  homeId,
+  treeOwners = {},
   selectedGroup,
   onGroupSelect
 }) => {
@@ -69,8 +78,8 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
             <div className="w-12 h-12 bg-green-600 rounded-xl flex items-center justify-center mx-auto mb-3">
               <MapPin className="w-6 h-6 text-white" />
             </div>
-            <div className="text-2xl font-bold text-green-700">{chromosomes.length}</div>
-            <div className="text-sm text-green-600">Chromosomes Covered</div>
+            <div className="text-2xl font-bold text-green-700">{groups.filter(g => g.evidence === 'exact').length}</div>
+            <div className="text-sm text-green-600" title={`Across ${chromosomes.length} chromosomes`}>Exact-Boundary Triangulations</div>
           </div>
           
           <div className="text-center p-4 bg-purple-50 rounded-xl">
@@ -100,12 +109,12 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
         <div className="p-6 border-b border-gray-100">
           <h2 className="text-xl font-semibold text-gray-800">Triangulation Groups</h2>
           <p className="text-sm text-gray-600 mt-2">
-            Each group is a stretch of DNA that every listed match shares <em>with you</em> (at least the minimum
-            shared stretch in Analysis Settings). That is the first step of triangulation, not proof: you have two
-            copies of each chromosome, so matches on the same stretch may be on your mother's copy or your
-            father's. A group is a confirmed triangulation once the matches also share that segment{' '}
-            <em>with each other</em> (check with your testing company's triangulation tool or GEDmatch). Tag known
-            cousins with a lineage to keep the two sides apart.
+            <strong>Exact-boundary triangulations</strong> are matches whose segments start and end at the same
+            positions. Those boundaries are crossovers in your own inheritance, so the matches are on the same copy of
+            your chromosome and match each other there: a true triangulation. The other groups are{' '}
+            <em>overlaps</em>: every listed match shares the stretch with you, but they may be on your mother's copy or
+            your father's, so confirm they match each other (your testing company's triangulation tool or GEDmatch).
+            Tag known cousins with a lineage to keep the two sides apart.
           </p>
         </div>
         
@@ -148,6 +157,12 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                         {group.startPosition.toLocaleString()}-{group.endPosition.toLocaleString()}
                       </div>
                       <LineageBadge group={group} />
+                      {group.generationEstimate && (
+                        <div className="text-xs text-indigo-700 mt-1" title="Genetic clock: generations back to the shared ancestor, from segment length (80% range)">
+                          Clock: ~{group.generationEstimate.mostLikely}{group.generationEstimate.mostLikely >= MAX_GENERATIONS ? '+' : ''} generation{group.generationEstimate.mostLikely === 1 ? '' : 's'} back
+                          ({group.generationEstimate.low}–{group.generationEstimate.high}{group.generationEstimate.high >= MAX_GENERATIONS ? '+' : ''})
+                        </div>
+                      )}
                       {group.relationshipPrediction && (
                         <div className="text-xs text-blue-600 mt-1" title="Predicted from the median person's total shared cM, not the group's combined cM">
                           Typical match: {group.relationshipPrediction.relationship} ({group.relationshipPrediction.confidence} confidence)
@@ -311,6 +326,8 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                       </table>
                     </div>
                     
+                    <TimeSpacePanel group={group} tree={tree} homeId={homeId} treeOwners={treeOwners} />
+
                     {/* Enhanced genealogical information */}
                     {(group.treeMatches && group.treeMatches.length > 0) && (
                       <div className="mt-4 p-4 bg-green-50 rounded-lg">
@@ -429,6 +446,11 @@ const LineageBadge: React.FC<{ group: TriangulationGroup }> = ({ group }) => {
 };
 
 const EVIDENCE_STYLES = {
+  exact: {
+    label: 'Exact-boundary triangulation',
+    className: 'bg-emerald-600 text-white',
+    help: 'Every member\'s segment starts and ends at the same positions. Crossovers in different families almost never land on the same spots, so these boundaries are crossovers in your own inheritance: the members are on the same copy of your chromosome and match each other here.'
+  },
   strong: {
     label: 'Large overlap (15+ cM)',
     className: 'bg-green-100 text-green-800',
@@ -451,9 +473,28 @@ const EvidenceBadge: React.FC<{ group: TriangulationGroup }> = ({ group }) => {
   const help = group.evidence === 'pile-up'
     ? `${style.help} (${group.regionMatchCount} matches in your upload share DNA here.)`
     : style.help;
+  const people = new Set(group.matches.map(m => m.matchName)).size;
   return (
-    <div className={`inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full ${style.className}`} title={help}>
-      {style.label}
+    <div className="flex flex-col items-end gap-1 mt-1">
+      <div className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${style.className}`} title={help}>
+        {style.label}
+      </div>
+      {group.evidence === 'exact' && group.possiblePileUp && (
+        <div
+          className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-gray-200 text-gray-700"
+          title={`${EVIDENCE_STYLES['pile-up'].help} (${group.regionMatchCount} matches in your upload share DNA here.)`}
+        >
+          In a pile-up region
+        </div>
+      )}
+      {group.evidence !== 'exact' && group.boundaryShareCount >= 2 && (
+        <div
+          className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-800"
+          title="These members' segments start or end at the same position as another member's: likely on the same copy of your chromosome."
+        >
+          {group.boundaryShareCount} of {people} share a boundary
+        </div>
+      )}
     </div>
   );
 };

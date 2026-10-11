@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { Upload, FileText, Search, Download, AlertCircle, CheckCircle2, TreePine } from 'lucide-react';
+import { Upload, FileText, Search, Download, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { FileUpload } from './FileUpload';
 import { TriangulationResults } from './TriangulationResults';
 import { SettingsPanel } from './SettingsPanel';
@@ -16,12 +16,15 @@ import {
   GenealogicalTree
 } from '../types/triangulation';
 import { parseGEDCOM } from '../utils/gedcomParser';
+import { TreePanel } from './TreePanel';
+import { LoadedTree, TreeOwners, mergeTrees } from '../utils/timeSpace';
 import { extractGenerationNumber } from '../utils/relationshipPredictor';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7,
   minimumMatches: 3,
   minimumOverlapCM: 7,
+  boundaryToleranceBp: 0,
   enableRelationshipPrediction: true,
   enableCrossVerification: true,
   separateByLineage: true,
@@ -61,7 +64,13 @@ export const TriangulationCalculator: React.FC = () => {
   const [filterOptions, setFilterOptions] = useState<FilterOptions>(DEFAULT_FILTERS);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<number | undefined>();
-  const [genealogicalTree, setGenealogicalTree] = useState<GenealogicalTree | null>(null);
+  const [loadedTrees, setLoadedTrees] = useState<LoadedTree[]>([]);
+  const [homeId, setHomeId] = useState<string | undefined>();
+  const [treeOwners, setTreeOwners] = useState<TreeOwners>({});
+  const genealogicalTree = useMemo<GenealogicalTree | null>(
+    () => (loadedTrees.length ? mergeTrees(loadedTrees) : null),
+    [loadedTrees]
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [nameIssuesWarning, setNameIssuesWarning] = useState<string | null>(null);
@@ -82,6 +91,39 @@ export const TriangulationCalculator: React.FC = () => {
   }, [loadedMatches, settings, lineageTags, genealogicalTree, annotations]);
 
   const lineageTagCount = Object.values(lineageTags).filter(Boolean).length;
+
+  // Distinct match names (display form) for linking trees to matches
+  const matchNames = useMemo(
+    () => Array.from(new Map(loadedMatches.map(m => [canonicalizeName(m.matchName), m.matchName])).values()).sort(),
+    [loadedMatches]
+  );
+
+  // Home person defaults to the first person in your tree (GEDCOM exports usually start with the root person)
+  const effectiveHomeId = homeId ?? genealogicalTree?.individuals.find(p => p.sourceFile === loadedTrees[0]?.fileName)?.id;
+
+  // Who each extra tree belongs to: what the user typed, or a match whose name appears
+  // in the tree or file name. Stored canonically so it can be compared with group members.
+  const effectiveOwners = useMemo<TreeOwners>(() => {
+    const result: TreeOwners = {};
+    loadedTrees.slice(1).forEach(({ fileName, tree }) => {
+      let owner = treeOwners[fileName];
+      if (owner === undefined) {
+        const treeNames = new Set(tree.individuals.map(p => canonicalizeName(p.name)));
+        const file = fileName.toLowerCase();
+        owner = matchNames.find(name => treeNames.has(canonicalizeName(name)) || file.includes(canonicalizeName(name))) ?? '';
+      }
+      result[fileName] = owner ? canonicalizeName(owner) : '';
+    });
+    return result;
+  }, [loadedTrees, treeOwners, matchNames]);
+
+  const displayOwners = useMemo<TreeOwners>(() => {
+    const result: TreeOwners = {};
+    loadedTrees.slice(1).forEach(({ fileName }) => {
+      result[fileName] = treeOwners[fileName] ?? matchNames.find(name => canonicalizeName(name) === effectiveOwners[fileName]) ?? '';
+    });
+    return result;
+  }, [loadedTrees, treeOwners, matchNames, effectiveOwners]);
 
   // Filter and sort triangulation groups
   const filteredAndSortedGroups = useMemo(() => {
@@ -260,7 +302,9 @@ Please check that your CSV files contain:
     setError(null);
     setNameIssuesWarning(null);
     setSelectedGroup(undefined);
-    setGenealogicalTree(null);
+    setLoadedTrees([]);
+    setHomeId(undefined);
+    setTreeOwners({});
     setCurrentPage(1);
   }, []);
 
@@ -268,7 +312,7 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Evidence,Shared Stretch (cM),Matches In Region,Group Typical Relationship,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage,Match Total Shared (cM),Match Relationship Prediction',
+      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Evidence,Shared Stretch (cM),Matches In Region,Possible Pile-Up,Members Sharing A Boundary,Group Typical Relationship,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage,Match Total Shared (cM),Match Relationship Prediction,Clock Most Likely Generations,Clock 80% Range',
       ...triangulationGroups.flatMap(group =>
         group.matches.map(match => [
           group.id + 1,
@@ -285,6 +329,8 @@ Please check that your CSV files contain:
           group.evidence,
           group.sharedCM.toFixed(1),
           group.regionMatchCount,
+          group.possiblePileUp ? 'yes' : 'no',
+          group.boundaryShareCount,
           group.relationshipPrediction?.relationship || 'N/A',
           group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || '',
           group.annotations?.locations?.join('; ') || match.locations?.join('; ') || '',
@@ -293,7 +339,9 @@ Please check that your CSV files contain:
           match.lineage || '',
           group.lineageConflict ? 'CONFLICT' : group.lineage || '',
           match.totalSharedCM?.toFixed(1) || '',
-          match.relationshipPrediction?.relationship || ''
+          match.relationshipPrediction?.relationship || '',
+          group.generationEstimate?.mostLikely ?? '',
+          group.generationEstimate ? `${group.generationEstimate.low}-${group.generationEstimate.high}` : ''
         ].map(csvEscape).join(','))
       )
     ].join('\n');
@@ -322,14 +370,19 @@ Please check that your CSV files contain:
     setLineageTags(prev => ({ ...prev, [canonicalizeName(matchName)]: lineage }));
   }, []);
 
-  const handleTreeUpload = useCallback(async (file: File) => {
+  const handleTreeUpload = useCallback(async (files: File[]) => {
     try {
-      const tree = await parseGEDCOM(file);
-      setGenealogicalTree(tree);
-      setProcessingMessage(`Loaded genealogical tree with ${tree.individuals.length} individuals`);
+      const parsed = await Promise.all(files.map(async file => ({ fileName: file.name, tree: await parseGEDCOM(file) })));
+      // Re-uploading a file replaces it
+      setLoadedTrees(prev => [...prev.filter(t => !parsed.some(p => p.fileName === t.fileName)), ...parsed]);
     } catch {
       setError('Failed to parse GEDCOM file. Please ensure it\'s a valid GEDCOM format.');
     }
+  }, []);
+
+  const handleTreeRemove = useCallback((fileName: string) => {
+    setLoadedTrees(prev => prev.filter(t => t.fileName !== fileName));
+    setHomeId(undefined);
   }, []);
 
   const handleFilterChange = useCallback((newFilterOptions: FilterOptions) => {
@@ -402,29 +455,18 @@ Please check that your CSV files contain:
               </div>
             )}
 
-            {/* GEDCOM Upload */}
-            {settings.enableCrossVerification && (
-              <div className="mt-6">
-                <h3 className="text-sm font-medium text-gray-700 mb-3 flex items-center">
-                  <TreePine className="w-4 h-4 mr-2" />
-                  Family Tree (GEDCOM)
-                </h3>
-                <input
-                  type="file"
-                  accept=".ged,.gedcom"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleTreeUpload(file);
-                  }}
-                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                />
-                {genealogicalTree && (
-                  <div className="mt-2 text-xs text-green-600">
-                    ✓ Loaded {genealogicalTree.individuals.length} individuals
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Family trees for surname links and the time + place analysis */}
+            <TreePanel
+              trees={loadedTrees}
+              mergedTree={genealogicalTree}
+              homeId={effectiveHomeId}
+              owners={displayOwners}
+              matchNames={matchNames}
+              onUpload={handleTreeUpload}
+              onRemove={handleTreeRemove}
+              onHomeChange={setHomeId}
+              onOwnerChange={(fileName, owner) => setTreeOwners(prev => ({ ...prev, [fileName]: owner }))}
+            />
 
             <div className="mt-6 space-y-3">
               <button
@@ -566,6 +608,9 @@ Please check that your CSV files contain:
             <TriangulationResults 
               groups={currentGroupsForDisplay}
               onLineageChange={handleLineageChange}
+              tree={genealogicalTree}
+              homeId={effectiveHomeId}
+              treeOwners={effectiveOwners}
               selectedGroup={selectedGroup}
               onGroupSelect={setSelectedGroup}
             />

@@ -1,12 +1,14 @@
 import { DNAMatch, EvidenceLevel, TriangulationGroup, CSVRow, TriangulationSettings, GenealogicalTree, TreeMatchInfo } from '../types/triangulation';
 import { parseCSV } from './csvParser';
 import { predictRelationship } from './relationshipPredictor';
+import { estimateGenerations } from './segmentAge';
 import { lineagesCompatible, mergeLineages, normalizeLineage, summarizeLineage } from './lineage';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7, // 7 cM minimum
   minimumMatches: 3, // At least 3 people for triangulation
   minimumOverlapCM: 7, // Everyone must share at least 7 cM
+  boundaryToleranceBp: 0, // Exact boundaries
   enableRelationshipPrediction: true,
   enableCrossVerification: false,
   separateByLineage: true,
@@ -162,8 +164,15 @@ export const buildTriangulationGroups = (
   const coverage = buildCoverageMap(matches);
   for (const group of triangulationGroups) {
     group.regionMatchCount = coverage.peopleInRegion(group.chromosome, group.startPosition, group.endPosition);
-    group.evidence = classifyEvidence(group.sharedCM, group.regionMatchCount, coverage.pileUpThreshold);
+    group.possiblePileUp = group.regionMatchCount > coverage.pileUpThreshold;
+    group.boundaryShareCount = countSharedBoundaries(group.matches, settings.boundaryToleranceBp);
+    group.evidence = group.evidence === 'exact'
+      ? 'exact'
+      : classifyEvidence(group.sharedCM, group.regionMatchCount, coverage.pileUpThreshold);
     group.confidenceScore = EVIDENCE_RANK[group.evidence];
+    // Genetic clock from the members' own segment lengths (median, so one unusually
+    // long or short segment does not swing it), above the match list's reporting threshold
+    group.generationEstimate = estimateGenerations(median(group.matches.map(m => m.sizeCM)), settings.minimumSize);
     
     // Relationship of a typical member (median person), for the cousin-level filters
     if (settings.enableRelationshipPrediction) {
@@ -174,6 +183,12 @@ export const buildTriangulationGroups = (
   onProgress(`Analysis complete: Found ${triangulationGroups.length} triangulation groups`);
   
   return triangulationGroups;
+};
+
+const median = (values: number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
 /** Median total shared cM across the distinct people in a group */
@@ -551,8 +566,9 @@ export const findTriangulations = (
   for (const [chromosome, chromosomeMatches] of matchesByChromosome) {
     onProgress(`Analyzing chromosome ${chromosome} (${chromosomeMatches.length} segments)...`);
     
-    const groups = findTriangulationsOnChromosome(chromosomeMatches, settings);
-    initialTriangulationGroups.push(...groups);
+    // Exact-boundary triangulations first; overlap groups are built from what is left
+    const { groups: exactGroups, remaining } = findExactBoundaryGroups(chromosomeMatches, settings);
+    initialTriangulationGroups.push(...exactGroups, ...findTriangulationsOnChromosome(remaining, settings));
   }
   
   const finalGroups = initialTriangulationGroups;
@@ -735,6 +751,8 @@ const findTriangulationsOnChromosome = (
       // Set after grouping
       confidenceScore: 0,
       evidence: 'moderate',
+      possiblePileUp: false,
+      boundaryShareCount: 0,
       regionMatchCount: 0
     });
     
@@ -783,7 +801,7 @@ const extractSurnamesFromName = (name: string): string[] => {
 const cmPerBasePair = (match: DNAMatch): number =>
   match.sizeCM / Math.max(1, match.endPosition - match.startPosition);
 
-const EVIDENCE_RANK: Record<EvidenceLevel, number> = { strong: 90, moderate: 60, 'pile-up': 20 };
+const EVIDENCE_RANK: Record<EvidenceLevel, number> = { exact: 100, strong: 90, moderate: 60, 'pile-up': 20 };
 
 /** Segments of 15 cM or more are almost always identical by descent (ISOGG) */
 const STRONG_SHARED_CM = 15;
@@ -792,6 +810,88 @@ export const classifyEvidence = (sharedCM: number, regionMatchCount: number, pil
   if (regionMatchCount > pileUpThreshold) return 'pile-up';
   return sharedCM >= STRONG_SHARED_CM ? 'strong' : 'moderate';
 };
+
+const sameBoundary = (a: number, b: number, toleranceBp: number): boolean => Math.abs(a - b) <= toleranceBp;
+
+/**
+ * Finds groups of distinct people whose segments start and end at the same positions
+ * (within the tolerance). Boundaries shared by several matches are crossovers in your
+ * own inheritance, so these matches are on the same copy of your chromosome and match
+ * each other across the segment: true triangulations, not just overlaps.
+ */
+export const findExactBoundaryGroups = (
+  matches: DNAMatch[],
+  settings: TriangulationSettings
+): { groups: TriangulationGroup[]; remaining: DNAMatch[] } => {
+  const tolerance = Math.max(0, settings.boundaryToleranceBp);
+  const used = new Set<number>();
+  const groups: TriangulationGroup[] = [];
+  
+  // Largest segments first
+  const order = matches
+    .map((_, index) => index)
+    .sort((a, b) => matches[b].sizeCM - matches[a].sizeCM || matches[a].startPosition - matches[b].startPosition);
+  
+  for (const i of order) {
+    if (used.has(i)) continue;
+    const anchor = matches[i];
+    if (anchor.sizeCM < settings.minimumOverlapCM) continue;
+    
+    const indices = [i];
+    const people = new Set([canonicalizeName(anchor.matchName)]);
+    let lineage = anchor.lineage;
+    for (let j = 0; j < matches.length; j++) {
+      if (j === i || used.has(j)) continue;
+      const other = matches[j];
+      if (!sameBoundary(other.startPosition, anchor.startPosition, tolerance) ||
+          !sameBoundary(other.endPosition, anchor.endPosition, tolerance)) continue;
+      const person = canonicalizeName(other.matchName);
+      if (people.has(person)) continue;
+      if (settings.separateByLineage && lineage && other.lineage && !lineagesCompatible(lineage, other.lineage)) continue;
+      indices.push(j);
+      people.add(person);
+      lineage = mergeLineages(lineage, other.lineage);
+    }
+    if (people.size < settings.minimumMatches) continue;
+    
+    const groupMatches = indices.map(index => matches[index]);
+    const regionStart = Math.max(...groupMatches.map(m => m.startPosition));
+    const regionEnd = Math.min(...groupMatches.map(m => m.endPosition));
+    if (regionEnd <= regionStart) continue;
+    const minRate = Math.min(...groupMatches.map(cmPerBasePair));
+    const sharedCM = Math.round((regionEnd - regionStart) * minRate * 10) / 10;
+    if (sharedCM < settings.minimumOverlapCM) continue;
+    
+    const totalSize = groupMatches.reduce((sum, match) => sum + match.sizeCM, 0);
+    groups.push({
+      id: 0, // Assigned after sorting
+      chromosome: anchor.chromosome,
+      startPosition: regionStart,
+      endPosition: regionEnd,
+      matches: groupMatches,
+      averageSize: totalSize / groupMatches.length,
+      totalSize,
+      sharedCM,
+      confidenceScore: 0,
+      evidence: 'exact',
+      possiblePileUp: false,
+      boundaryShareCount: 0,
+      regionMatchCount: 0
+    });
+    indices.forEach(index => used.add(index));
+  }
+  
+  return { groups, remaining: matches.filter((_, index) => !used.has(index)) };
+};
+
+/** How many members share a start or an end position with at least one other member */
+export const countSharedBoundaries = (matches: DNAMatch[], toleranceBp: number): number =>
+  matches.filter((match, i) => matches.some((other, j) =>
+    j !== i &&
+    canonicalizeName(other.matchName) !== canonicalizeName(match.matchName) &&
+    (sameBoundary(other.startPosition, match.startPosition, toleranceBp) ||
+      sameBoundary(other.endPosition, match.endPosition, toleranceBp))
+  )).length;
 
 const BIN_SIZE = 1_000_000;
 

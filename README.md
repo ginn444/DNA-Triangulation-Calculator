@@ -123,7 +123,15 @@ You carry two copies of each chromosome, one from each parent, so matches from d
 - X chromosome groups tagged through a father's father (`PP` anywhere in the path) are flagged, because a father never passes his X chromosome to his son.
 - Tags are saved in your browser and reused for future uploads. You can also tag in bulk by adding a `Lineage` column to your CSV (values like `P`, `PPM`, `Paternal`, `Maternal`).
 
-### 6. GEDCOM Integration (Optional)
+### 6. Time + Place: Hunting an Ancestor Who Isn't on Paper
+When a triangulated group's ancestor on paper doesn't fit (for example a misattributed parentage event), use the group as a coordinate: **time** from the segment's length, **place** from where people lived then. Expand any group to see its **Time + Place** panel.
+
+- **Genetic clock.** Each generation cuts segments shorter, so the length of the group's segments estimates how many generations back the shared ancestor lived. The app shows the most likely generation, an 80% range, and a bar for each generation. One segment is a rough clock: a 20 cM block most likely points about 4 generations back (range ~1–10); blocks under ~12 cM are too short to date closely. Model: segment length is exponential with rate 2G/100 per cM for cousins whose ancestor is G generations back, conditioned on the list's reporting threshold (Thomas et al. 1994; Huff et al. 2011).
+- **Your ancestors in the window.** Upload your tree and pick yourself as the home person. The app lists your ancestors in the clock's range, with their line (`P`, `PM`, ...) and birth place. If the group is tagged with a lineage, only ancestors on that line are shown.
+- **Where people lived.** Places of people in the window (your ancestors, plus anyone in a match's tree, placed in time by birth year) are clustered at county and state level and weighted by how likely the clock says each person's generation is. A **Neighbor effect** place is one where different surnames or different trees converge, which is a good place to look for the real ancestor.
+- **Matches' trees.** Upload several GEDCOMs: your own first, then any matches' trees. Each extra tree is linked to the match whose name appears in it (or set "Whose tree?"), and only counts for groups that include that match. Unlinked trees count for every group.
+
+### 7. GEDCOM Integration (Optional)
 - Upload GEDCOM file for family tree cross-referencing
 - Enable cross-verification in settings
 - View suggested common ancestors
@@ -161,7 +169,11 @@ A chromosome browser export lists the segments each match shares **with you**. T
 3. **Best groups first**: For every segment, the app works out the group it would anchor (closest overlaps first). It keeps the group with the largest shared stretch (then the most people), sets its members aside, and repeats. A new member must share at least half of the anchor segment, and 70% of what the group's first pair shares, so weaker partial overlaps cannot shrink a strong family cluster.
 4. **Distinct people**: Groups need enough *distinct people* (one person's multiple segments never count twice), and matches tagged to conflicting lineages are never grouped together.
 
+### Exact-boundary triangulation (strongest)
+Before forming overlap groups, the app looks for matches whose segments **start and end at the same positions**. Each end of a segment you share with a match is set by a crossover, either in your line or in theirs. Independent crossovers in different families almost never land on the same positions, so boundaries shared by several matches are crossovers in *your own* inheritance. Those matches are therefore on the same copy of your chromosome, and they match each other across the segment: a true triangulation, not just an overlap. The **Boundary Matching** setting is exact by default; allow 100 kb–1 Mb of slack when combining files from different companies, whose chips end segments at slightly different positions. Overlap groups also show how many members share a start or end with another member, which is partial same-copy evidence.
+
 ### Evidence levels
+- **Exact-boundary triangulation**: Same start and end positions, as above. Flagged if it also sits in a pile-up region.
 - **Large overlap (15+ cM)**: Everyone shares 15 cM or more with you here. Segments this size are almost always inherited from a real common ancestor (ISOGG), so these are the strongest leads.
 - **Overlap 7-15 cM**: Meets the minimum; a reasonable lead.
 - **Possible pile-up**: The stretch is covered by far more of your matches than is typical for your upload (more than 3x the median 1 Mb stretch, and at least 10 matches). Pile-ups usually reflect very old shared ancestry, so they are weak evidence of a recent common ancestor.
