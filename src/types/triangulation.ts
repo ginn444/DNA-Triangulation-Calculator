@@ -30,6 +30,16 @@ export interface RelationshipPrediction {
   confidence: 'high' | 'medium' | 'low';
 }
 
+/**
+ * How strong the overlap evidence for a group is. Overlap with you alone does not prove the
+ * matches share the segment with each other (it may be on your other parental copy).
+ * - strong:   everyone shares a stretch of 15 cM or more with you (segments this size are almost always IBD)
+ * - moderate: the shared stretch is at least the minimum (default 7 cM) but under 15 cM
+ * - pile-up:  the stretch sits where unusually many of your matches share DNA, which usually
+ *             reflects very old shared ancestry rather than a recent common ancestor
+ */
+export type EvidenceLevel = 'strong' | 'moderate' | 'pile-up';
+
 export interface TriangulationGroup {
   id: number; // Stable identifier, independent of filtering, sorting and paging
   chromosome: number;
@@ -39,7 +49,13 @@ export interface TriangulationGroup {
   averageSize: number;
   totalSize: number;
   // Enhanced analysis fields
+  // Rank derived from the evidence level (strong 90, moderate 60, pile-up 20), for sorting and filtering
   confidenceScore: number;
+  evidence: EvidenceLevel;
+  // Estimated cM of the stretch every member shares with you (conservative: smallest member estimate)
+  sharedCM: number;
+  // Distinct matches in the whole upload with a segment covering this stretch
+  regionMatchCount: number;
   relationshipPrediction?: RelationshipPrediction;
   annotations?: GroupAnnotation;
   commonAncestors?: string[];
@@ -76,10 +92,9 @@ export type ProcessingStatus = 'idle' | 'processing' | 'completed' | 'error';
 export interface TriangulationSettings {
   minimumSize: number; // Minimum segment size in cM
   minimumMatches: number; // Minimum number of matches for triangulation
-  overlapThreshold: number; // Minimum overlap percentage
+  minimumOverlapCM: number; // Minimum size of the stretch every member shares, in cM
   // Enhanced features
   enableRelationshipPrediction: boolean;
-  enableConfidenceScoring: boolean;
   enableCrossVerification: boolean;
   separateByLineage: boolean; // Never group matches tagged with conflicting lineages
   maxResultsPerPage: number;
@@ -97,7 +112,8 @@ export interface FilterOptions {
   searchTerm?: string;
   // A lineage path to show (that branch and deeper), or 'untagged' / 'conflict'
   lineage?: string;
-  sortBy: 'chromosome' | 'averageSize' | 'matches' | 'confidenceScore' | 'startPosition' | 'commonAncestors';
+  evidence?: EvidenceLevel | 'not-pile-up';
+  sortBy: 'chromosome' | 'averageSize' | 'matches' | 'confidenceScore' | 'startPosition' | 'commonAncestors' | 'sharedCM';
   sortOrder: 'asc' | 'desc';
 }
 

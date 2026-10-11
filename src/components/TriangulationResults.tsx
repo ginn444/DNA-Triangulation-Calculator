@@ -88,9 +88,9 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
               <Star className="w-6 h-6 text-white" />
             </div>
             <div className="text-2xl font-bold text-orange-700">
-              {Math.round(groups.reduce((sum, g) => sum + (g.confidenceScore || 0), 0) / groups.length)}
+              {groups.filter(g => g.evidence === 'strong').length}
             </div>
-            <div className="text-sm text-orange-600">Avg. Confidence</div>
+            <div className="text-sm text-orange-600">Large Overlaps (15+ cM)</div>
           </div>
         </div>
       </div>
@@ -99,6 +99,14 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100">
         <div className="p-6 border-b border-gray-100">
           <h2 className="text-xl font-semibold text-gray-800">Triangulation Groups</h2>
+          <p className="text-sm text-gray-600 mt-2">
+            Each group is a stretch of DNA that every listed match shares <em>with you</em> (at least the minimum
+            shared stretch in Analysis Settings). That is the first step of triangulation, not proof: you have two
+            copies of each chromosome, so matches on the same stretch may be on your mother's copy or your
+            father's. A group is a confirmed triangulation once the matches also share that segment{' '}
+            <em>with each other</em> (check with your testing company's triangulation tool or GEDmatch). Tag known
+            cousins with a lineage to keep the two sides apart.
+          </p>
         </div>
         
         <div className="divide-y divide-gray-100">
@@ -150,15 +158,11 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                   
                   <div className="flex items-center space-x-4">
                     <div className="text-right">
-                      <div className="text-sm font-medium text-gray-800">
-                        {group.totalSize.toFixed(1)} cM
+                      <div className="text-sm font-medium text-gray-800" title="Estimated cM of the stretch every member shares with you">
+                        {group.sharedCM.toFixed(1)} cM
                       </div>
-                      <div className="text-xs text-gray-500">Total Size</div>
-                      {group.confidenceScore > 0 && (
-                        <div className="text-xs text-orange-600 font-medium">
-                          {group.confidenceScore}% confidence
-                        </div>
-                      )}
+                      <div className="text-xs text-gray-500">Shared stretch</div>
+                      <EvidenceBadge group={group} />
                     </div>
                     
                     {/* Enhanced indicators */}
@@ -420,6 +424,36 @@ const LineageBadge: React.FC<{ group: TriangulationGroup }> = ({ group }) => {
           Not possible on X
         </span>
       )}
+    </div>
+  );
+};
+
+const EVIDENCE_STYLES = {
+  strong: {
+    label: 'Large overlap (15+ cM)',
+    className: 'bg-green-100 text-green-800',
+    help: 'Everyone shares 15 cM or more with you on this stretch. Segments this size are almost always truly inherited, so this is a strong lead. It is a confirmed triangulation only once the matches also share it with each other.'
+  },
+  moderate: {
+    label: 'Overlap 7-15 cM',
+    className: 'bg-yellow-100 text-yellow-800',
+    help: 'Everyone shares at least the minimum (default 7 cM) but under 15 cM with you on this stretch. A reasonable lead; confirm that the matches share it with each other.'
+  },
+  'pile-up': {
+    label: 'Possible pile-up',
+    className: 'bg-gray-200 text-gray-700',
+    help: 'Far more of your matches share DNA on this stretch than is typical, which usually reflects very old shared ancestry. Weak evidence of a recent common ancestor.'
+  }
+} as const;
+
+const EvidenceBadge: React.FC<{ group: TriangulationGroup }> = ({ group }) => {
+  const style = EVIDENCE_STYLES[group.evidence];
+  const help = group.evidence === 'pile-up'
+    ? `${style.help} (${group.regionMatchCount} matches in your upload share DNA here.)`
+    : style.help;
+  return (
+    <div className={`inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full ${style.className}`} title={help}>
+      {style.label}
     </div>
   );
 };

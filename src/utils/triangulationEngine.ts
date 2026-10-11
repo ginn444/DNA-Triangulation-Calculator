@@ -1,14 +1,13 @@
-import { DNAMatch, TriangulationGroup, CSVRow, TriangulationSettings, GenealogicalTree, TreeMatchInfo } from '../types/triangulation';
+import { DNAMatch, EvidenceLevel, TriangulationGroup, CSVRow, TriangulationSettings, GenealogicalTree, TreeMatchInfo } from '../types/triangulation';
 import { parseCSV } from './csvParser';
-import { predictRelationship, calculateConfidenceScore } from './relationshipPredictor';
+import { predictRelationship } from './relationshipPredictor';
 import { lineagesCompatible, mergeLineages, normalizeLineage, summarizeLineage } from './lineage';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7, // 7 cM minimum
   minimumMatches: 3, // At least 3 people for triangulation
-  overlapThreshold: 0.5, // 50% overlap required
+  minimumOverlapCM: 7, // Everyone must share at least 7 cM
   enableRelationshipPrediction: true,
-  enableConfidenceScoring: true,
   enableCrossVerification: false,
   separateByLineage: true,
   maxResultsPerPage: 25
@@ -158,27 +157,18 @@ export const buildTriangulationGroups = (
   // Find triangulations
   const triangulationGroups = findTriangulations(matches, settings, onProgress, genealogicalTree);
   
-  // Apply enhanced analysis if enabled
-  if (settings.enableRelationshipPrediction || settings.enableConfidenceScoring) {
-    onProgress('Applying enhanced analysis...');
-    triangulationGroups.forEach(group => {
-      // Calculate confidence score
-      if (settings.enableConfidenceScoring) {
-        const totalCM = typicalMemberTotal(group.matches);
-        const averageOverlap = calculateAverageOverlap(group.matches);
-        group.confidenceScore = calculateConfidenceScore(
-          group.averageSize,
-          averageOverlap,
-          group.matches.length,
-          totalCM
-        );
-      }
-      
-      // Relationship of a typical member (median person), for the cousin-level filters
-      if (settings.enableRelationshipPrediction) {
-        group.relationshipPrediction = predictRelationship(typicalMemberTotal(group.matches));
-      }
-    });
+  // Evidence level from the shared stretch size and how crowded that stretch is
+  onProgress('Checking for pile-up regions...');
+  const coverage = buildCoverageMap(matches);
+  for (const group of triangulationGroups) {
+    group.regionMatchCount = coverage.peopleInRegion(group.chromosome, group.startPosition, group.endPosition);
+    group.evidence = classifyEvidence(group.sharedCM, group.regionMatchCount, coverage.pileUpThreshold);
+    group.confidenceScore = EVIDENCE_RANK[group.evidence];
+    
+    // Relationship of a typical member (median person), for the cousin-level filters
+    if (settings.enableRelationshipPrediction) {
+      group.relationshipPrediction = predictRelationship(typicalMemberTotal(group.matches));
+    }
   }
   
   onProgress(`Analysis complete: Found ${triangulationGroups.length} triangulation groups`);
@@ -601,91 +591,165 @@ export const findTriangulations = (
   return finalGroups;
 };
 
+/**
+ * A new member must keep at least this share of the anchor segment in common with
+ * the group, so a match that overlaps only the edge of a strong family cluster
+ * cannot shrink everyone's shared stretch down to the bare minimum.
+ */
+const ANCHOR_SHARE = 0.5;
+
+/**
+ * A new member must also cover at least this share of the stretch the group's first
+ * pair shares (measured against that pair, so the shrinkage cannot compound), so
+ * later, weaker overlaps cannot whittle a strong cluster down.
+ */
+const GROUP_SHARE = 0.7;
+
+interface Cluster {
+  indices: number[];
+  people: number;
+  regionStart: number;
+  regionEnd: number;
+  sharedCM: number;
+}
+
+/**
+ * Builds the best group around one anchor segment from the segments not yet used:
+ * closest overlaps first, keeping only members that leave everyone sharing enough.
+ */
+const buildCluster = (
+  anchor: number,
+  matches: DNAMatch[],
+  used: Set<number>,
+  settings: TriangulationSettings
+): Cluster | null => {
+  const baseMatch = matches[anchor];
+  if (baseMatch.sizeCM < settings.minimumOverlapCM) return null;
+  
+  const baseRate = cmPerBasePair(baseMatch);
+  const requiredCM = Math.max(settings.minimumOverlapCM, baseMatch.sizeCM * ANCHOR_SHARE);
+  
+  const candidates: { index: number; overlapCM: number }[] = [];
+  for (let j = 0; j < matches.length; j++) {
+    if (j === anchor || used.has(j)) continue;
+    const other = matches[j];
+    const overlapBp = Math.min(baseMatch.endPosition, other.endPosition) - Math.max(baseMatch.startPosition, other.startPosition);
+    if (overlapBp <= 0) continue;
+    const overlapCM = overlapBp * Math.min(baseRate, cmPerBasePair(other));
+    if (overlapCM >= requiredCM) candidates.push({ index: j, overlapCM });
+  }
+  candidates.sort((a, b) => b.overlapCM - a.overlapCM);
+  
+  const indices = [anchor];
+  const people = new Set([canonicalizeName(baseMatch.matchName)]);
+  let groupLineage = baseMatch.lineage;
+  // The stretch shared by every member so far, and the lowest cM-per-base-pair
+  // among members so its cM is estimated conservatively
+  let regionStart = baseMatch.startPosition;
+  let regionEnd = baseMatch.endPosition;
+  let minRate = baseRate;
+  let coreCM = 0; // Shared cM of the anchor and its first (closest) member
+  
+  for (const { index: j } of candidates) {
+    const testMatch = matches[j];
+    
+    // A person cannot triangulate with themselves
+    const person = canonicalizeName(testMatch.matchName);
+    if (people.has(person)) continue;
+    
+    // Matches tagged to different branches sit on different copies of the
+    // chromosome (or different ancestors), so they cannot triangulate
+    if (settings.separateByLineage && groupLineage && testMatch.lineage &&
+        !lineagesCompatible(groupLineage, testMatch.lineage)) {
+      continue;
+    }
+    
+    // Only add a member if everyone would still share enough. Without this floor
+    // each new member narrows the shared stretch until it is too short (often
+    // well under 1 cM) to be evidence of a common ancestor.
+    const newStart = Math.max(regionStart, testMatch.startPosition);
+    const newEnd = Math.min(regionEnd, testMatch.endPosition);
+    if (newEnd <= newStart) continue;
+    const rate = Math.min(minRate, cmPerBasePair(testMatch));
+    const newCM = (newEnd - newStart) * rate;
+    if (newCM < requiredCM) continue;
+    if (indices.length >= 2 && newCM < coreCM * GROUP_SHARE) continue;
+    
+    if (indices.length === 1) coreCM = newCM;
+    indices.push(j);
+    people.add(person);
+    groupLineage = mergeLineages(groupLineage, testMatch.lineage);
+    regionStart = newStart;
+    regionEnd = newEnd;
+    minRate = rate;
+  }
+  
+  if (people.size < settings.minimumMatches) return null;
+  return {
+    indices,
+    people: people.size,
+    regionStart,
+    regionEnd,
+    sharedCM: Math.round((regionEnd - regionStart) * minRate * 10) / 10
+  };
+};
+
+/**
+ * The size of the stretch everyone shares is the evidence, so prefer the larger
+ * shared stretch, then more people
+ */
+const isBetterCluster = (a: Cluster, b: Cluster): boolean =>
+  a.sharedCM > b.sharedCM || (a.sharedCM === b.sharedCM && a.people > b.people);
+
 const findTriangulationsOnChromosome = (
   matches: DNAMatch[], 
   settings: TriangulationSettings
 ): TriangulationGroup[] => {
   const triangulationGroups: TriangulationGroup[] = [];
-  const processedMatches = new Set<number>();
+  const used = new Set<number>();
   
-  // Sort matches by start position
-  matches.sort((a, b) => a.startPosition - b.startPosition);
+  // Work out the group each segment would anchor, then repeatedly keep the best
+  // one (so a tight family cluster is formed before unrelated partial overlaps
+  // can split it) and rebuild only the candidate groups it affected
+  const clusters = new Map<number, Cluster | null>();
+  matches.forEach((_, index) => clusters.set(index, buildCluster(index, matches, used, settings)));
   
-  for (let i = 0; i < matches.length; i++) {
-    if (processedMatches.has(i)) continue;
-    
-    const baseMatch = matches[i];
-    const overlappingMatches = [baseMatch];
-    const overlappingIndices = [i];
-    const people = new Set([canonicalizeName(baseMatch.matchName)]);
-    let groupLineage = baseMatch.lineage;
-    
-    // The region shared by every member of the group so far. Each new member
-    // is tested against this region (not just the base match) so that all
-    // members genuinely share the same stretch of DNA.
-    let regionStart = baseMatch.startPosition;
-    let regionEnd = baseMatch.endPosition;
-    
-    for (let j = i + 1; j < matches.length; j++) {
-      if (processedMatches.has(j)) continue;
-      
-      const testMatch = matches[j];
-      
-      // If the test match starts after the shared region ends, no more overlaps possible
-      if (testMatch.startPosition >= regionEnd) {
-        break;
-      }
-      
-      // A person cannot triangulate with themselves
-      const person = canonicalizeName(testMatch.matchName);
-      if (people.has(person)) continue;
-      
-      // Matches tagged to different branches sit on different copies of the
-      // chromosome (or different ancestors), so they cannot triangulate
-      if (settings.separateByLineage && groupLineage && testMatch.lineage &&
-          !lineagesCompatible(groupLineage, testMatch.lineage)) {
-        continue;
-      }
-      
-      const overlapStart = Math.max(regionStart, testMatch.startPosition);
-      const overlapEnd = Math.min(regionEnd, testMatch.endPosition);
-      
-      if (overlapEnd > overlapStart) {
-        const overlapSize = overlapEnd - overlapStart;
-        const regionSize = regionEnd - regionStart;
-        const testSize = testMatch.endPosition - testMatch.startPosition;
-        const minSize = Math.min(regionSize, testSize);
-        
-        // Check if overlap is significant enough
-        if (overlapSize / minSize >= settings.overlapThreshold) {
-          overlappingMatches.push(testMatch);
-          overlappingIndices.push(j);
-          people.add(person);
-          groupLineage = mergeLineages(groupLineage, testMatch.lineage);
-          regionStart = overlapStart;
-          regionEnd = overlapEnd;
-        }
-      }
+  for (;;) {
+    let best: Cluster | null = null;
+    for (const cluster of clusters.values()) {
+      if (cluster && (!best || isBetterCluster(cluster, best))) best = cluster;
     }
+    if (!best) break;
     
-    // If we have enough distinct people for triangulation, create a group
-    if (people.size >= settings.minimumMatches) {
-      const totalSize = overlappingMatches.reduce((sum, match) => sum + match.sizeCM, 0);
-      const averageSize = totalSize / overlappingMatches.length;
-      
-      triangulationGroups.push({
-        id: 0, // Assigned after sorting
-        chromosome: baseMatch.chromosome,
-        startPosition: regionStart,
-        endPosition: regionEnd,
-        matches: overlappingMatches,
-        averageSize,
-        totalSize,
-        confidenceScore: 0 // Will be calculated later
-      });
-      
-      // Mark these matches as processed
-      overlappingIndices.forEach(index => processedMatches.add(index));
+    const groupMatches = best.indices.map(index => matches[index]);
+    const totalSize = groupMatches.reduce((sum, match) => sum + match.sizeCM, 0);
+    triangulationGroups.push({
+      id: 0, // Assigned after sorting
+      chromosome: groupMatches[0].chromosome,
+      startPosition: best.regionStart,
+      endPosition: best.regionEnd,
+      matches: groupMatches,
+      averageSize: totalSize / groupMatches.length,
+      totalSize,
+      sharedCM: best.sharedCM,
+      // Set after grouping
+      confidenceScore: 0,
+      evidence: 'moderate',
+      regionMatchCount: 0
+    });
+    
+    // Members are used up; any anchor overlapping them may now form a different group
+    best.indices.forEach(index => {
+      used.add(index);
+      clusters.delete(index);
+    });
+    const spanStart = Math.min(...groupMatches.map(m => m.startPosition));
+    const spanEnd = Math.max(...groupMatches.map(m => m.endPosition));
+    for (const index of clusters.keys()) {
+      const anchor = matches[index];
+      if (anchor.startPosition < spanEnd && anchor.endPosition > spanStart) {
+        clusters.set(index, buildCluster(index, matches, used, settings));
+      }
     }
   }
   
@@ -715,32 +779,51 @@ const extractSurnamesFromName = (name: string): string[] => {
   return [];
 };
 
-const calculateAverageOverlap = (matches: DNAMatch[]): number => {
-  if (matches.length < 2) return 100;
-  
-  let totalOverlap = 0;
-  let overlapCount = 0;
-  
-  for (let i = 0; i < matches.length; i++) {
-    for (let j = i + 1; j < matches.length; j++) {
-      const match1 = matches[i];
-      const match2 = matches[j];
-      
-      const overlapStart = Math.max(match1.startPosition, match2.startPosition);
-      const overlapEnd = Math.min(match1.endPosition, match2.endPosition);
-      
-      if (overlapEnd > overlapStart) {
-        const overlapSize = overlapEnd - overlapStart;
-        const match1Size = match1.endPosition - match1.startPosition;
-        const match2Size = match2.endPosition - match2.startPosition;
-        const minSize = Math.min(match1Size, match2Size);
-        
-        const overlapPercentage = (overlapSize / minSize) * 100;
-        totalOverlap += overlapPercentage;
-        overlapCount++;
-      }
+/** A segment's cM per base pair (genetic distance varies along chromosomes, so use each segment's own rate) */
+const cmPerBasePair = (match: DNAMatch): number =>
+  match.sizeCM / Math.max(1, match.endPosition - match.startPosition);
+
+const EVIDENCE_RANK: Record<EvidenceLevel, number> = { strong: 90, moderate: 60, 'pile-up': 20 };
+
+/** Segments of 15 cM or more are almost always identical by descent (ISOGG) */
+const STRONG_SHARED_CM = 15;
+
+export const classifyEvidence = (sharedCM: number, regionMatchCount: number, pileUpThreshold: number): EvidenceLevel => {
+  if (regionMatchCount > pileUpThreshold) return 'pile-up';
+  return sharedCM >= STRONG_SHARED_CM ? 'strong' : 'moderate';
+};
+
+const BIN_SIZE = 1_000_000;
+
+/**
+ * Counts how many distinct matches cover each 1 Mb stretch of each chromosome.
+ * A stretch covered by far more matches than is typical for this upload (3x the
+ * median covered stretch, and at least 10 matches) is treated as a pile-up region.
+ */
+export const buildCoverageMap = (matches: DNAMatch[]) => {
+  const bins = new Map<string, Set<string>>();
+  for (const match of matches) {
+    const person = canonicalizeName(match.matchName);
+    const first = Math.floor(match.startPosition / BIN_SIZE);
+    const last = Math.floor(match.endPosition / BIN_SIZE);
+    for (let bin = first; bin <= last; bin++) {
+      const key = `${match.chromosome}:${bin}`;
+      if (!bins.has(key)) bins.set(key, new Set());
+      bins.get(key)!.add(person);
     }
   }
   
-  return overlapCount > 0 ? totalOverlap / overlapCount : 100;
+  const counts = Array.from(bins.values()).map(people => people.size).sort((a, b) => a - b);
+  const median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+  const pileUpThreshold = Math.max(10, median * 3);
+  
+  const peopleInRegion = (chromosome: number, start: number, end: number): number => {
+    let most = 0;
+    for (let bin = Math.floor(start / BIN_SIZE); bin <= Math.floor(end / BIN_SIZE); bin++) {
+      most = Math.max(most, bins.get(`${chromosome}:${bin}`)?.size ?? 0);
+    }
+    return most;
+  };
+  
+  return { pileUpThreshold, peopleInRegion };
 };

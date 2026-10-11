@@ -54,9 +54,8 @@ describe('family tree cross-verification', () => {
   const settings: TriangulationSettings = {
     minimumSize: 7,
     minimumMatches: 3,
-    overlapThreshold: 0.5,
+    minimumOverlapCM: 7,
     enableRelationshipPrediction: false,
-    enableConfidenceScoring: false,
     enableCrossVerification: true,
     separateByLineage: true,
     maxResultsPerPage: 25

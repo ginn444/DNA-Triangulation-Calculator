@@ -63,29 +63,6 @@ export const predictRelationship = (totalCM: number): RelationshipPrediction => 
   };
 };
 
-export const calculateConfidenceScore = (
-  averageSize: number,
-  overlapPercentage: number,
-  matchCount: number,
-  totalCM: number
-): number => {
-  // Normalize each factor to 0-1 scale
-  const sizeScore = Math.min(averageSize / 20, 1); // 20+ cM gets full score
-  const overlapScore = overlapPercentage / 100;
-  const matchScore = Math.min(matchCount / 10, 1); // 10+ matches gets full score
-  const totalScore = Math.min(totalCM / 1000, 1); // 1000+ cM gets full score
-  
-  // Weighted average
-  const confidenceScore = (
-    sizeScore * 0.3 +
-    overlapScore * 0.2 +
-    matchScore * 0.3 +
-    totalScore * 0.2
-  );
-  
-  return Math.round(confidenceScore * 100);
-};
-
 export const getRelationshipDescription = (relationship: string): string => {
   const descriptions: Record<string, string> = {
     'Parent/Child': 'Direct parent-child relationship',
