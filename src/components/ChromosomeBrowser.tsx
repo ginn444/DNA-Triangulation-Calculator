@@ -166,7 +166,10 @@ export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
             <p>Chromosome {selected.chromosome === 23 ? 'X' : selected.chromosome}</p>
             <p>{selected.matches.length} matches</p>
             <p>Average size: {selected.averageSize.toFixed(1)} cM</p>
-            <p>Confidence: {selected.confidenceScore}%</p>
+            <p>
+              Shared stretch: {selected.sharedCM.toFixed(1)} cM ·{' '}
+              {selected.evidence === 'strong' ? 'Large overlap' : selected.evidence === 'moderate' ? 'Overlap 7-15 cM' : 'Possible pile-up'}
+            </p>
           </div>
         </div>
       )}

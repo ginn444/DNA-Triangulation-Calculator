@@ -87,21 +87,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
               <div>
                 <label className="block text-sm text-gray-600 mb-2">
-                  Overlap Threshold: {Math.round(settings.overlapThreshold * 100)}%
+                  Minimum Shared Stretch: {settings.minimumOverlapCM} cM
                 </label>
                 <input
                   type="range"
-                  min="0.1"
-                  max="1"
-                  step="0.05"
-                  value={settings.overlapThreshold}
-                  onChange={(e) => handleChange('overlapThreshold', parseFloat(e.target.value))}
+                  min="5"
+                  max="30"
+                  step="1"
+                  value={settings.minimumOverlapCM}
+                  onChange={(e) => handleChange('minimumOverlapCM', parseFloat(e.target.value))}
                   className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
                 />
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>10%</span>
-                  <span>100%</span>
+                  <span>5 cM</span>
+                  <span>30 cM</span>
                 </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Every match in a group must share at least this much DNA with you on the same stretch. 7 cM is the usual minimum; 15+ cM is very reliable.
+                </p>
               </div>
             </div>
           </div>
@@ -133,27 +136,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   )}
                 </div>
                 <span className="text-sm text-gray-700">Relationship Prediction</span>
-              </label>
-
-              <label className="flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={settings.enableConfidenceScoring}
-                  onChange={(e) => handleChange('enableConfidenceScoring', e.target.checked)}
-                  className="sr-only"
-                />
-                <div className={`w-5 h-5 rounded border-2 mr-3 flex items-center justify-center ${
-                  settings.enableConfidenceScoring 
-                    ? 'bg-blue-600 border-blue-600' 
-                    : 'border-gray-300'
-                }`}>
-                  {settings.enableConfidenceScoring && (
-                    <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  )}
-                </div>
-                <span className="text-sm text-gray-700">Confidence Scoring</span>
               </label>
 
               <label className="flex items-center cursor-pointer">
@@ -236,9 +218,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 const defaultSettings: TriangulationSettings = {
                   minimumSize: 7,
                   minimumMatches: 3,
-                  overlapThreshold: 0.5,
+                  minimumOverlapCM: 7,
                   enableRelationshipPrediction: true,
-                  enableConfidenceScoring: true,
                   enableCrossVerification: false,
                   separateByLineage: true,
                   maxResultsPerPage: 25

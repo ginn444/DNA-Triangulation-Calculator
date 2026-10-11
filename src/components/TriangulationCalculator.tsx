@@ -21,17 +21,17 @@ import { extractGenerationNumber } from '../utils/relationshipPredictor';
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7,
   minimumMatches: 3,
-  overlapThreshold: 0.5,
+  minimumOverlapCM: 7,
   enableRelationshipPrediction: true,
-  enableConfidenceScoring: true,
   enableCrossVerification: true,
   separateByLineage: true,
   maxResultsPerPage: 200
 };
 
+// Strongest evidence first
 const DEFAULT_FILTERS: FilterOptions = {
-  sortBy: 'commonAncestors',
-  sortOrder: 'asc'
+  sortBy: 'confidenceScore',
+  sortOrder: 'desc'
 };
 
 const LINEAGE_STORAGE_KEY = 'dna-triangulation-lineage-tags';
@@ -97,8 +97,12 @@ export const TriangulationCalculator: React.FC = () => {
       if (filterOptions.minMatches && group.matches.length < filterOptions.minMatches) return false;
       if (filterOptions.maxMatches && group.matches.length > filterOptions.maxMatches) return false;
       
-      // Confidence filter
-      if (filterOptions.confidenceThreshold && group.confidenceScore < filterOptions.confidenceThreshold) return false;
+      // Evidence filter
+      if (filterOptions.evidence === 'not-pile-up') {
+        if (group.evidence === 'pile-up') return false;
+      } else if (filterOptions.evidence && group.evidence !== filterOptions.evidence) {
+        return false;
+      }
       
       // Cousin level filter
       if (filterOptions.cousinLevel && (!group.relationshipPrediction || !group.relationshipPrediction.relationship.includes(filterOptions.cousinLevel))) return false;
@@ -156,7 +160,9 @@ export const TriangulationCalculator: React.FC = () => {
       
       const aValue = a[filterOptions.sortBy];
       const bValue = b[filterOptions.sortBy];
-      return filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+      // Ties (e.g. same evidence level) go to the larger shared stretch
+      const primary = filterOptions.sortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+      return primary || b.sharedCM - a.sharedCM;
     });
 
     return filtered;
@@ -204,8 +210,7 @@ export const TriangulationCalculator: React.FC = () => {
           if (message.includes('unclear names')) {
             setNameIssuesWarning('Some matches have unclear names (like numbers). Check the "Source File" column to identify which file they came from.');
           }
-        },
-        genealogicalTree // Pass the genealogical tree
+        }
       );
       
       setLoadedMatches(matches);
@@ -244,7 +249,7 @@ Please check that your CSV files contain:
       setProcessingStatus('error');
       setProcessingMessage('');
     }
-  }, [uploadedFiles, settings, genealogicalTree]);
+  }, [uploadedFiles, settings]);
 
   const handleReset = useCallback(() => {
     setUploadedFiles([]);
@@ -263,7 +268,7 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Group Typical Relationship,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage,Match Total Shared (cM),Match Relationship Prediction',
+      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Evidence,Shared Stretch (cM),Matches In Region,Group Typical Relationship,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage,Match Total Shared (cM),Match Relationship Prediction',
       ...triangulationGroups.flatMap(group =>
         group.matches.map(match => [
           group.id + 1,
@@ -277,7 +282,9 @@ Please check that your CSV files contain:
           match.yHaplogroup || 'N/A',
           match.mtHaplogroup || 'N/A',
           group.matches.length,
-          group.confidenceScore || 'N/A',
+          group.evidence,
+          group.sharedCM.toFixed(1),
+          group.regionMatchCount,
           group.relationshipPrediction?.relationship || 'N/A',
           group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || '',
           group.annotations?.locations?.join('; ') || match.locations?.join('; ') || '',

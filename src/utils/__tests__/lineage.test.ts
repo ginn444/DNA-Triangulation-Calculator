@@ -14,9 +14,8 @@ import { DNAMatch, TriangulationSettings } from '../../types/triangulation';
 const settings: TriangulationSettings = {
   minimumSize: 7,
   minimumMatches: 3,
-  overlapThreshold: 0.5,
+  minimumOverlapCM: 7,
   enableRelationshipPrediction: false,
-  enableConfidenceScoring: false,
   enableCrossVerification: false,
   separateByLineage: true,
   maxResultsPerPage: 25
@@ -85,11 +84,18 @@ describe('lineage-aware triangulation', () => {
   ];
 
   it('keeps conflicting branches in separate groups', () => {
-    const groups = buildTriangulationGroups(matches, settings);
-    expect(groups.map(g => [g.lineage, g.matches.map(m => m.matchName)])).toEqual([
-      ['PPP', ['Paul', 'Pete', 'Molly', 'Pat']],
-      ['PM', ['Mary', 'Meg', 'Mona']]
-    ]);
+    const groups = buildTriangulationGroups([...matches, segment('Pia', 320, 1000, 'PPP')], settings);
+    const groupOf = (name: string) => groups.find(g => g.matches.some(m => m.matchName === name));
+
+    expect(groups).toHaveLength(2);
+    expect(groups.every(g => !g.lineageConflict)).toBe(true);
+    // Tagged members stay with their own branch; untagged ones may join either
+    expect(groupOf('Paul')).toBe(groupOf('Pat'));
+    expect(groupOf('Paul')).toBe(groupOf('Pia'));
+    expect(groupOf('Mary')).toBe(groupOf('Meg'));
+    expect(groupOf('Mary')).toBe(groupOf('Mona'));
+    expect(groupOf('Paul')?.lineage).toBe('PPP');
+    expect(groupOf('Mary')?.lineage).toBe('PM');
   });
 
   it('marks a mixed group as a conflict when separation is off', () => {

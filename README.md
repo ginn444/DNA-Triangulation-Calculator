@@ -17,7 +17,7 @@ DNA triangulation is a genealogical technique that confirms shared ancestry by i
 ### Analysis Capabilities
 - **Triangulation Detection**: Identifies overlapping DNA segments between multiple matches
 - **Relationship Prediction**: Estimates relationships based on shared DNA amounts
-- **Confidence Scoring**: Calculates reliability scores for triangulation groups
+- **Evidence Levels**: Rates each group by the size of the stretch everyone shares and flags likely pile-up regions
 - **Chromosome Browser**: Visual representation of triangulated segments across chromosomes
 
 ### Enhanced Features
@@ -96,8 +96,8 @@ npm run build
 ### 2. Configure Analysis Settings
 - **Minimum Segment Size**: Set threshold for segment inclusion (default: 7 cM)
 - **Minimum Matches**: Required number of matches for triangulation (default: 3)
-- **Overlap Threshold**: Minimum overlap percentage (default: 50%)
-- **Enable Advanced Features**: Relationship prediction, confidence scoring
+- **Minimum Shared Stretch**: How much DNA every match in a group must share with you on the same stretch (default: 7 cM; 15+ cM is very reliable)
+- **Enable Advanced Features**: Relationship prediction
 
 ### 3. Process Data
 - Click "Calculate Triangulations" to begin analysis
@@ -152,22 +152,24 @@ You carry two copies of each chromosome, one from each parent, so matches from d
 
 ## 📊 Analysis Methodology
 
-### Triangulation Detection
-1. **Deduplication**: Merge name variants of the same person and drop identical segments exported in more than one file
-2. **Segment Grouping**: Group DNA segments by chromosome
-3. **Overlap Calculation**: Grow each group one match at a time, requiring every new member to overlap the region already shared by the whole group
-4. **Threshold Application**: Apply minimum size and overlap requirements
-5. **Group Formation**: Keep groups with enough *distinct people* (one person's multiple segments never count twice)
+### What the app can and cannot tell from a chromosome browser file
+A chromosome browser export lists the segments each match shares **with you**. Triangulation has three legs: you share a segment with A, you share it with B, and **A shares it with B**. The third leg is not in these files, so the app finds the first two legs (everyone overlapping you on the same stretch) and rates how strong that evidence is. Because you have two copies of every chromosome, matches overlapping you on the same stretch may be on your mother's copy or your father's; confirm the third leg with your testing company's triangulation tool or GEDmatch, and use lineage tags to keep the two sides apart.
 
-### Confidence Scoring
-Confidence scores are calculated based on:
-- Average segment size (larger = higher confidence)
-- Overlap percentage (higher = more reliable)
-- Number of matches (more = better triangulation)
-- Total shared DNA amount
+### How groups are formed
+1. **Deduplication**: Merge name variants of the same person and drop identical segments exported in more than one file.
+2. **Minimum shared stretch**: Every member of a group must share at least the minimum (default 7 cM) with you on one common stretch. Its size in cM is estimated from each member's own segment (cM per base pair), using the most conservative member.
+3. **Best groups first**: For every segment, the app works out the group it would anchor (closest overlaps first). It keeps the group with the largest shared stretch (then the most people), sets its members aside, and repeats. A new member must share at least half of the anchor segment, and 70% of what the group's first pair shares, so weaker partial overlaps cannot shrink a strong family cluster.
+4. **Distinct people**: Groups need enough *distinct people* (one person's multiple segments never count twice), and matches tagged to conflicting lineages are never grouped together.
+
+### Evidence levels
+- **Large overlap (15+ cM)**: Everyone shares 15 cM or more with you here. Segments this size are almost always inherited from a real common ancestor (ISOGG), so these are the strongest leads.
+- **Overlap 7-15 cM**: Meets the minimum; a reasonable lead.
+- **Possible pile-up**: The stretch is covered by far more of your matches than is typical for your upload (more than 3x the median 1 Mb stretch, and at least 10 matches). Pile-ups usually reflect very old shared ancestry, so they are weak evidence of a recent common ancestor.
+
+Results are sorted with the largest overlaps first. Use the **Evidence** filter to hide possible pile-ups or show only large overlaps.
 
 ### Relationship Prediction
-Uses statistical data from the Shared cM Project to estimate relationships:
+Each match's relationship is estimated from that person's total shared cM across all their uploaded segments (never from a group's combined cM), using statistical data from the Shared cM Project:
 - Parent/Child: 3400-3720 cM
 - Full Sibling: 2200-3400 cM
 - 1st Cousin: 550-1300 cM

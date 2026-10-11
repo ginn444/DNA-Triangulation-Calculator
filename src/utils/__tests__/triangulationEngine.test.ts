@@ -12,9 +12,8 @@ import { DNAMatch, TriangulationSettings } from '../../types/triangulation';
 const settings: TriangulationSettings = {
   minimumSize: 7,
   minimumMatches: 3,
-  overlapThreshold: 0.5,
+  minimumOverlapCM: 7,
   enableRelationshipPrediction: false,
-  enableConfidenceScoring: false,
   enableCrossVerification: false,
   separateByLineage: true,
   maxResultsPerPage: 25
@@ -99,17 +98,20 @@ describe('findTriangulations', () => {
   });
 
   it('only adds members that overlap the region shared by the whole group', () => {
-    // Bob and Carol each overlap Alice, but not each other
+    // ~1 cM per Mb. Bob and Carol each overlap Alice, but barely overlap each other
+    const mb = (matchName: string, startMb: number, endMb: number): DNAMatch & { sourceFile: string } => ({
+      ...segment(matchName, startMb * 1e6, endMb * 1e6), sizeCM: endMb - startMb
+    });
     const groups = findTriangulations([
-      segment('Alice', 0, 1000),
-      segment('Bob', 0, 500),
-      segment('Carol', 500, 1000),
-      segment('Dave', 100, 450)
+      mb('Alice', 0, 20),
+      mb('Bob', 0, 12),
+      mb('Carol', 10, 20),
+      mb('Dave', 1, 12)
     ], settings);
 
     expect(groups).toHaveLength(1);
     expect(groups[0].matches.map(m => m.matchName)).toEqual(['Alice', 'Bob', 'Dave']);
-    expect(groups[0]).toMatchObject({ startPosition: 100, endPosition: 450 });
+    expect(groups[0]).toMatchObject({ startPosition: 1e6, endPosition: 12e6, sharedCM: 11 });
   });
 
   it('assigns ids in display order', () => {
@@ -150,5 +152,64 @@ describe('relationship prediction', () => {
 
     const alice = groups[0].matches.find(m => m.matchName === 'Alice');
     expect(alice?.totalSharedCM).toBe(70);
+  });
+});
+
+describe('scientific triangulation rules', () => {
+  // ~1 cM per Mb
+  const seg = (matchName: string, startMb: number, endMb: number, chromosome = 7): DNAMatch => ({
+    matchName, chromosome, startPosition: startMb * 1e6, endPosition: endMb * 1e6, sizeCM: endMb - startMb
+  });
+
+  it('never lets the shared stretch shrink below the minimum cM', () => {
+    // Staggered 10 cM segments: all five overlap, but together they share only 6 cM
+    const groups = buildTriangulationGroups([
+      seg('A', 0, 10), seg('B', 1, 11), seg('C', 2, 12), seg('D', 3, 13), seg('E', 4, 14)
+    ], settings);
+
+    for (const group of groups) {
+      expect(group.sharedCM).toBeGreaterThanOrEqual(7);
+      expect(group.endPosition - group.startPosition).toBeGreaterThanOrEqual(7e6);
+    }
+    // E would shrink the shared stretch to 6 cM, so it is left out
+    expect(groups).toHaveLength(1);
+    expect(groups[0].matches.map(m => m.matchName)).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  it('ignores segments smaller than the minimum shared stretch', () => {
+    const groups = buildTriangulationGroups([seg('A', 0, 6), seg('B', 0, 6), seg('C', 0, 6)], { ...settings, minimumSize: 5 });
+    expect(groups).toHaveLength(0);
+  });
+
+  it('rates a group by the size of the stretch everyone shares', () => {
+    const strong = buildTriangulationGroups([seg('A', 0, 20), seg('B', 1, 21), seg('C', 2, 22)], settings);
+    const moderate = buildTriangulationGroups([seg('A', 0, 10), seg('B', 1, 11), seg('C', 2, 12)], settings);
+    expect(strong[0]).toMatchObject({ evidence: 'strong', sharedCM: 18 });
+    expect(moderate[0]).toMatchObject({ evidence: 'moderate', sharedCM: 8 });
+  });
+
+  it('flags stretches where unusually many matches share DNA as possible pile-ups', () => {
+    const background = Array.from({ length: 40 }, (_, i) => seg(`Bg ${i}`, 10 + i * 3, 18 + i * 3, 1 + (i % 22)));
+    const crowd = Array.from({ length: 30 }, (_, i) => seg(`Crowd ${i}`, 50 + (i % 3) * 0.1, 60));
+    const family = [seg('Ann', 150, 170, 9), seg('Ben', 151, 171, 9), seg('Cat', 152, 172, 9)];
+    const groups = buildTriangulationGroups([...background, ...crowd, ...family], settings);
+
+    const crowdGroup = groups.find(g => g.matches.some(m => m.matchName.startsWith('Crowd')));
+    const familyGroup = groups.find(g => g.matches.some(m => m.matchName === 'Ann'));
+    expect(crowdGroup?.evidence).toBe('pile-up');
+    expect(crowdGroup?.regionMatchCount).toBeGreaterThanOrEqual(30);
+    expect(familyGroup?.evidence).toBe('strong');
+  });
+
+  it('keeps a strong family cluster intact when weaker overlaps are nearby', () => {
+    // Five cousins share ~20 cM; three unrelated matches overlap only part of it
+    const cousins = ['Ann', 'Ben', 'Cal', 'Dee', 'Eve'].map((n, i) => seg(n, 60 + i * 0.5, 82 + i * 0.3, 11));
+    const partial = [seg('X', 50, 73, 11), seg('Y', 70, 95, 11), seg('Z', 55, 75, 11)];
+    const groups = buildTriangulationGroups([...partial, ...cousins], settings);
+
+    const family = groups.find(g => g.matches.some(m => m.matchName === 'Ann'));
+    expect(family?.matches.map(m => m.matchName).sort()).toEqual(['Ann', 'Ben', 'Cal', 'Dee', 'Eve']);
+    expect(family?.sharedCM).toBeGreaterThanOrEqual(19);
+    expect(family?.evidence).toBe('strong');
   });
 });

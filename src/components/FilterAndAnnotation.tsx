@@ -207,18 +207,20 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
               </select>
             </div>
 
-            {/* Confidence Threshold */}
+            {/* Evidence Filter */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Min Confidence (%)</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={filterOptions.confidenceThreshold || ''}
-                onChange={(e) => handleFilterChange('confidenceThreshold', e.target.value ? parseInt(e.target.value) : undefined)}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Evidence</label>
+              <select
+                value={filterOptions.evidence || ''}
+                onChange={(e) => handleFilterChange('evidence', (e.target.value || undefined) as FilterOptions['evidence'])}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="0"
-              />
+              >
+                <option value="">All</option>
+                <option value="not-pile-up">Hide possible pile-ups</option>
+                <option value="strong">Large overlaps only (15+ cM)</option>
+                <option value="moderate">7-15 cM overlaps only</option>
+                <option value="pile-up">Possible pile-ups only</option>
+              </select>
             </div>
 
             {/* Max Matches */}
@@ -247,9 +249,10 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
             <option value="chromosome">Chromosome</option>
             <option value="averageSize">Size</option>
             <option value="matches">Matches</option>
-            <option value="confidenceScore">Confidence</option>
+            <option value="confidenceScore">Evidence (largest overlaps first)</option>
+            <option value="sharedCM">Shared Stretch (cM)</option>
             <option value="startPosition">Start Position</option>
-            <option value="commonAncestors">Suggested Common Ancestor</option>
+            <option value="commonAncestors">Tree Surname Line</option>
           </select>
           
           <button

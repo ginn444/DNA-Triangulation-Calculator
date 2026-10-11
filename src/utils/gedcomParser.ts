@@ -1,8 +1,13 @@
 import { GenealogicalTree, TreeIndividual, TreeRelationship } from '../types/triangulation';
 
 export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
-  const text = await file.text();
-  const lines = text.split('\n');
+  return parseGEDCOMText(await file.text());
+};
+
+export const parseGEDCOMText = (text: string): GenealogicalTree => {
+  // GEDCOM files may use CRLF (Windows), LF (Unix) or CR-only (classic Mac,
+  // e.g. MacFamilyTree) line endings, and may start with a byte order mark
+  const lines = text.replace(/^\uFEFF/, '').split(/\r\n|\r|\n/);
   
   const individuals: TreeIndividual[] = [];
   const relationships: TreeRelationship[] = [];
@@ -10,15 +15,19 @@ export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
   
   let currentIndividual: Partial<TreeIndividual> | null = null;
   let currentFamily: { id: string; husband?: string; wife?: string; children: string[] } | null = null;
+  let currentEvent = ''; // The level-1 tag (BIRT, DEAT, RESI, ...) that level-2 DATE/PLAC lines belong to
   
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     
-    const parts = trimmed.split(/\s+/, 3);
-    const level = parseInt(parts[0]);
-    const tag = parts[1];
-    const value = parts[2] || '';
+    // "LEVEL TAG VALUE", where VALUE is the rest of the line and may contain spaces
+    // (split(/\s+/, 3) would drop everything after the first word of the value)
+    const parsed = trimmed.match(/^(\d+)\s+(\S+)(?:\s(.*))?$/);
+    if (!parsed) continue;
+    const level = parseInt(parsed[1]);
+    const tag = parsed[2];
+    const value = (parsed[3] || '').trim();
     
     if (level === 0) {
       // Save previous individual/family
@@ -66,11 +75,13 @@ export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
         }
       }
       
-      // Start new individual or family
-      if (tag.startsWith('@I')) {
+      // Start new individual or family. Identify records by type ("0 @X1@ INDI"),
+      // not by ID prefix: programs use many ID styles (@I1@, @P1@, @402699101126@)
+      const recordType = value.trim().toUpperCase();
+      if (recordType === 'INDI') {
         currentIndividual = { id: tag };
         currentFamily = null;
-      } else if (tag.startsWith('@F')) {
+      } else if (recordType === 'FAM') {
         currentFamily = { id: tag, children: [] };
         currentIndividual = null;
       } else {
@@ -78,9 +89,12 @@ export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
         currentFamily = null;
       }
     } else if (level === 1) {
+      currentEvent = tag;
       if (currentIndividual) {
         switch (tag) {
           case 'NAME': {
+            // Keep the primary (first) name; later NAME lines are alternates
+            if (currentIndividual.name) break;
             const nameParts = value.split('/');
             const firstName = nameParts[0]?.trim() || '';
             const lastName = nameParts[1]?.trim() || '';
@@ -117,13 +131,20 @@ export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
       if (currentIndividual) {
         switch (tag) {
           case 'DATE':
-            // This is a simplified date parser
-            if (value.includes('BIRT')) {
+            if (currentEvent === 'BIRT' && !currentIndividual.birthDate) {
               currentIndividual.birthDate = value;
-            } else if (value.includes('DEAT')) {
+            } else if (currentEvent === 'DEAT' && !currentIndividual.deathDate) {
               currentIndividual.deathDate = value;
             }
             break;
+          case 'PLAC': {
+            // "Gainesville,,Allen,Kentucky,USA" -> "Gainesville, Allen, Kentucky, USA"
+            const place = value.split(',').map(part => part.trim()).filter(Boolean).join(', ');
+            if (!place) break;
+            if (!currentIndividual.locations) currentIndividual.locations = [];
+            if (!currentIndividual.locations.includes(place)) currentIndividual.locations.push(place);
+            break;
+          }
         }
       }
     }
