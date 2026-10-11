@@ -55,6 +55,7 @@ describe('family tree cross-verification', () => {
     minimumSize: 7,
     minimumMatches: 3,
     minimumOverlapCM: 7,
+    boundaryToleranceBp: 0,
     enableRelationshipPrediction: false,
     enableCrossVerification: true,
     separateByLineage: true,

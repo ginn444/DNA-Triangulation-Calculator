@@ -13,6 +13,7 @@ const settings: TriangulationSettings = {
   minimumSize: 7,
   minimumMatches: 3,
   minimumOverlapCM: 7,
+  boundaryToleranceBp: 0,
   enableRelationshipPrediction: false,
   enableCrossVerification: false,
   separateByLineage: true,
@@ -190,7 +191,8 @@ describe('scientific triangulation rules', () => {
 
   it('flags stretches where unusually many matches share DNA as possible pile-ups', () => {
     const background = Array.from({ length: 40 }, (_, i) => seg(`Bg ${i}`, 10 + i * 3, 18 + i * 3, 1 + (i % 22)));
-    const crowd = Array.from({ length: 30 }, (_, i) => seg(`Crowd ${i}`, 50 + (i % 3) * 0.1, 60));
+    // Staggered starts and ends so no two share a boundary (that would be an exact-boundary triangulation)
+    const crowd = Array.from({ length: 30 }, (_, i) => seg(`Crowd ${i}`, 50 + i * 0.01, 60 + i * 0.013));
     const family = [seg('Ann', 150, 170, 9), seg('Ben', 151, 171, 9), seg('Cat', 152, 172, 9)];
     const groups = buildTriangulationGroups([...background, ...crowd, ...family], settings);
 
@@ -211,5 +213,35 @@ describe('scientific triangulation rules', () => {
     expect(family?.matches.map(m => m.matchName).sort()).toEqual(['Ann', 'Ben', 'Cal', 'Dee', 'Eve']);
     expect(family?.sharedCM).toBeGreaterThanOrEqual(19);
     expect(family?.evidence).toBe('strong');
+  });
+
+  it('finds exact-boundary triangulations before overlap groups', () => {
+    const groups = buildTriangulationGroups([
+      seg('Ann', 30, 48), seg('Ben', 30, 48), seg('Cal', 30, 48),  // identical start and end
+      seg('Dan', 31, 47), seg('Eve', 29.5, 47.5), seg('Fay', 30.5, 48.5) // overlap, different boundaries
+    ], settings);
+
+    const exact = groups.find(g => g.evidence === 'exact');
+    expect(exact?.matches.map(m => m.matchName).sort()).toEqual(['Ann', 'Ben', 'Cal']);
+    expect(exact).toMatchObject({ startPosition: 30e6, endPosition: 48e6, sharedCM: 18, confidenceScore: 100 });
+
+    const overlap = groups.find(g => g.matches.some(m => m.matchName === 'Dan'));
+    expect(overlap?.evidence).not.toBe('exact');
+    expect(overlap?.matches.map(m => m.matchName).sort()).toEqual(['Dan', 'Eve', 'Fay']);
+  });
+
+  it('allows a boundary tolerance for files from different chips', () => {
+    const near = [seg('Ann', 30, 48), seg('Ben', 30.05, 48.08), seg('Cal', 29.95, 47.97)];
+    expect(buildTriangulationGroups(near, settings)[0].evidence).not.toBe('exact');
+    expect(buildTriangulationGroups(near, { ...settings, boundaryToleranceBp: 100_000 })[0].evidence).toBe('exact');
+  });
+
+  it('counts overlap-group members that share a start or end', () => {
+    const groups = buildTriangulationGroups([
+      seg('Ann', 30, 48), seg('Ben', 30, 47), seg('Cal', 31, 47.5)
+    ], settings);
+    expect(groups[0].evidence).not.toBe('exact');
+    // Ann and Ben start at the same position; Cal shares neither boundary
+    expect(groups[0].boundaryShareCount).toBe(2);
   });
 });

@@ -33,14 +33,20 @@ export interface RelationshipPrediction {
 }
 
 /**
- * How strong the overlap evidence for a group is. Overlap with you alone does not prove the
- * matches share the segment with each other (it may be on your other parental copy).
+ * How strong the evidence for a group is.
+ * - exact:    every member's segment starts and ends at the same positions (within the boundary
+ *             tolerance). Independent crossovers in different families almost never land on the
+ *             same positions, so those boundaries are crossovers in your own inheritance: the
+ *             members are on the same copy of your chromosome and therefore match each other there.
+ *             This is a true triangulation.
+ * Overlap with you alone does not prove the matches share the segment with each other (it may be
+ * on your other parental copy):
  * - strong:   everyone shares a stretch of 15 cM or more with you (segments this size are almost always IBD)
  * - moderate: the shared stretch is at least the minimum (default 7 cM) but under 15 cM
  * - pile-up:  the stretch sits where unusually many of your matches share DNA, which usually
  *             reflects very old shared ancestry rather than a recent common ancestor
  */
-export type EvidenceLevel = 'strong' | 'moderate' | 'pile-up';
+export type EvidenceLevel = 'exact' | 'strong' | 'moderate' | 'pile-up';
 
 export interface TriangulationGroup {
   id: number; // Stable identifier, independent of filtering, sorting and paging
@@ -51,9 +57,13 @@ export interface TriangulationGroup {
   averageSize: number;
   totalSize: number;
   // Enhanced analysis fields
-  // Rank derived from the evidence level (strong 90, moderate 60, pile-up 20), for sorting and filtering
+  // Rank derived from the evidence level (exact 100, strong 90, moderate 60, pile-up 20), for sorting and filtering
   confidenceScore: number;
   evidence: EvidenceLevel;
+  // The stretch is covered by far more of your matches than usual (also set on exact groups)
+  possiblePileUp: boolean;
+  // Members whose segment starts or ends at the same position as another member's (same-copy evidence)
+  boundaryShareCount: number;
   // Estimated cM of the stretch every member shares with you (conservative: smallest member estimate)
   sharedCM: number;
   // Distinct matches in the whole upload with a segment covering this stretch
@@ -97,6 +107,7 @@ export interface TriangulationSettings {
   minimumSize: number; // Minimum segment size in cM
   minimumMatches: number; // Minimum number of matches for triangulation
   minimumOverlapCM: number; // Minimum size of the stretch every member shares, in cM
+  boundaryToleranceBp: number; // How far apart segment boundaries may be and still count as the same (0 = exact)
   // Enhanced features
   enableRelationshipPrediction: boolean;
   enableCrossVerification: boolean;

@@ -169,7 +169,11 @@ A chromosome browser export lists the segments each match shares **with you**. T
 3. **Best groups first**: For every segment, the app works out the group it would anchor (closest overlaps first). It keeps the group with the largest shared stretch (then the most people), sets its members aside, and repeats. A new member must share at least half of the anchor segment, and 70% of what the group's first pair shares, so weaker partial overlaps cannot shrink a strong family cluster.
 4. **Distinct people**: Groups need enough *distinct people* (one person's multiple segments never count twice), and matches tagged to conflicting lineages are never grouped together.
 
+### Exact-boundary triangulation (strongest)
+Before forming overlap groups, the app looks for matches whose segments **start and end at the same positions**. Each end of a segment you share with a match is set by a crossover, either in your line or in theirs. Independent crossovers in different families almost never land on the same positions, so boundaries shared by several matches are crossovers in *your own* inheritance. Those matches are therefore on the same copy of your chromosome, and they match each other across the segment: a true triangulation, not just an overlap. The **Boundary Matching** setting is exact by default; allow 100 kb–1 Mb of slack when combining files from different companies, whose chips end segments at slightly different positions. Overlap groups also show how many members share a start or end with another member, which is partial same-copy evidence.
+
 ### Evidence levels
+- **Exact-boundary triangulation**: Same start and end positions, as above. Flagged if it also sits in a pile-up region.
 - **Large overlap (15+ cM)**: Everyone shares 15 cM or more with you here. Segments this size are almost always inherited from a real common ancestor (ISOGG), so these are the strongest leads.
 - **Overlap 7-15 cM**: Meets the minimum; a reasonable lead.
 - **Possible pile-up**: The stretch is covered by far more of your matches than is typical for your upload (more than 3x the median 1 Mb stretch, and at least 10 matches). Pile-ups usually reflect very old shared ancestry, so they are weak evidence of a recent common ancestor.

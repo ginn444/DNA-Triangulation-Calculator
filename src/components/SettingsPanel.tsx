@@ -87,6 +87,27 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
               <div>
                 <label className="block text-sm text-gray-600 mb-2">
+                  Boundary Matching
+                </label>
+                <select
+                  value={settings.boundaryToleranceBp}
+                  onChange={(e) => handleChange('boundaryToleranceBp', parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value={0}>Exact start and end positions</option>
+                  <option value={100000}>Within 100 kb</option>
+                  <option value={250000}>Within 250 kb</option>
+                  <option value={500000}>Within 500 kb</option>
+                  <option value={1000000}>Within 1 Mb</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  For exact-boundary triangulation. Use exact for files from one company; allow a little slack when
+                  combining companies, whose chips end segments at slightly different positions.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-600 mb-2">
                   Minimum Shared Stretch: {settings.minimumOverlapCM} cM
                 </label>
                 <input
@@ -219,6 +240,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   minimumSize: 7,
                   minimumMatches: 3,
                   minimumOverlapCM: 7,
+                  boundaryToleranceBp: 0,
                   enableRelationshipPrediction: true,
                   enableCrossVerification: false,
                   separateByLineage: true,

@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7,
   minimumMatches: 3,
   minimumOverlapCM: 7,
+  boundaryToleranceBp: 0,
   enableRelationshipPrediction: true,
   enableCrossVerification: true,
   separateByLineage: true,
@@ -311,7 +312,7 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Evidence,Shared Stretch (cM),Matches In Region,Group Typical Relationship,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage,Match Total Shared (cM),Match Relationship Prediction,Clock Most Likely Generations,Clock 80% Range',
+      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Evidence,Shared Stretch (cM),Matches In Region,Possible Pile-Up,Members Sharing A Boundary,Group Typical Relationship,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage,Match Total Shared (cM),Match Relationship Prediction,Clock Most Likely Generations,Clock 80% Range',
       ...triangulationGroups.flatMap(group =>
         group.matches.map(match => [
           group.id + 1,
@@ -328,6 +329,8 @@ Please check that your CSV files contain:
           group.evidence,
           group.sharedCM.toFixed(1),
           group.regionMatchCount,
+          group.possiblePileUp ? 'yes' : 'no',
+          group.boundaryShareCount,
           group.relationshipPrediction?.relationship || 'N/A',
           group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || '',
           group.annotations?.locations?.join('; ') || match.locations?.join('; ') || '',

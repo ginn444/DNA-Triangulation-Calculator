@@ -168,7 +168,7 @@ export const ChromosomeBrowser: React.FC<ChromosomeBrowserProps> = ({
             <p>Average size: {selected.averageSize.toFixed(1)} cM</p>
             <p>
               Shared stretch: {selected.sharedCM.toFixed(1)} cM ·{' '}
-              {selected.evidence === 'strong' ? 'Large overlap' : selected.evidence === 'moderate' ? 'Overlap 7-15 cM' : 'Possible pile-up'}
+              {selected.evidence === 'exact' ? 'Exact-boundary triangulation' : selected.evidence === 'strong' ? 'Large overlap' : selected.evidence === 'moderate' ? 'Overlap 7-15 cM' : 'Possible pile-up'}
             </p>
           </div>
         </div>
