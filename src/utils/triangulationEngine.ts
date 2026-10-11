@@ -1,6 +1,7 @@
 import { DNAMatch, TriangulationGroup, CSVRow, TriangulationSettings, GenealogicalTree, TreeMatchInfo } from '../types/triangulation';
 import { parseCSV } from './csvParser';
 import { predictRelationship, calculateConfidenceScore } from './relationshipPredictor';
+import { lineagesCompatible, mergeLineages, normalizeLineage, summarizeLineage } from './lineage';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
   minimumSize: 7, // 7 cM minimum
@@ -9,6 +10,7 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
   enableRelationshipPrediction: true,
   enableConfidenceScoring: true,
   enableCrossVerification: false,
+  separateByLineage: true,
   maxResultsPerPage: 25
 };
 
@@ -26,6 +28,7 @@ interface MatchProfile {
   // Merged metadata
   yHaplogroup?: string;
   mtHaplogroup?: string;
+  lineage?: string;
   ancestralSurnames: Set<string>;
   locations: Set<string>;
   notes: Set<string>;
@@ -56,6 +59,21 @@ export const processTriangulation = async (
   onProgress: (message: string) => void,
   genealogicalTree: GenealogicalTree | null = null
 ): Promise<TriangulationGroup[]> => {
+  const matches = await loadMatches(files, settings, onProgress, genealogicalTree);
+  return buildTriangulationGroups(matches, settings, {}, onProgress, genealogicalTree);
+};
+
+/**
+ * Parses, deduplicates and (optionally) tree-enriches the DNA segments in the
+ * uploaded files. The result can be regrouped with buildTriangulationGroups
+ * without re-reading the files, e.g. after lineage tags change.
+ */
+export const loadMatches = async (
+  files: File[], 
+  settings: TriangulationSettings = DEFAULT_SETTINGS,
+  onProgress: (message: string) => void,
+  genealogicalTree: GenealogicalTree | null = null
+): Promise<DNAMatch[]> => {
   onProgress('Parsing uploaded CSV files...');
   
   const allRawMatches: RawDNAMatch[] = [];
@@ -70,7 +88,8 @@ export const processTriangulation = async (
       const csvData = await parseCSV(file);
       console.log(`CSV data from ${file.name}:`, csvData.slice(0, 3)); // Log first 3 rows for debugging
       
-      const { matches, issues } = parseMatchesFromCSV(csvData, file.name, settings);
+      // Size filtering happens in buildTriangulationGroups so it can change without re-uploading
+      const { matches, issues } = parseMatchesFromCSV(csvData, file.name, { ...settings, minimumSize: 0 });
       // Mark each match with its source file
       const markedMatches = matches.map(match => ({ ...match, sourceFile: file.name }));
       allRawMatches.push(...markedMatches);
@@ -104,10 +123,42 @@ export const processTriangulation = async (
     }
   }
   
-  onProgress(`Processing ${deduplicatedMatches.length} deduplicated DNA segments...`);
+  return deduplicatedMatches;
+};
+
+/**
+ * Identifies a group across regrouping (e.g. after lineage tags change) by the
+ * segment it was built from, so annotations and expanded state can follow it.
+ */
+export const groupKey = (group: TriangulationGroup): string => {
+  const base = group.matches[0];
+  return `${group.chromosome}:${canonicalizeName(base?.matchName ?? '')}:${base?.startPosition ?? group.startPosition}`;
+};
+
+/** Lineage tags keyed by canonical match name (see canonicalizeName); '' clears a CSV-provided lineage */
+export type LineageTags = Record<string, string>;
+
+/**
+ * Finds triangulation groups in already-loaded matches. Lineage tags set by
+ * the user override any lineage read from the CSV.
+ */
+export const buildTriangulationGroups = (
+  loadedMatches: DNAMatch[],
+  settings: TriangulationSettings,
+  lineageTags: LineageTags = {},
+  onProgress: (message: string) => void = () => {},
+  genealogicalTree: GenealogicalTree | null = null
+): TriangulationGroup[] => {
+  // Copy so grouping never mutates the loaded matches
+  const matches = loadedMatches.filter(match => match.sizeCM >= settings.minimumSize).map(match => {
+    const tag = lineageTags[canonicalizeName(match.matchName)];
+    return { ...match, lineage: tag !== undefined ? (tag || undefined) : match.lineage };
+  });
+  
+  onProgress(`Processing ${matches.length} deduplicated DNA segments...`);
   
   // Find triangulations
-  const triangulationGroups = findTriangulations(deduplicatedMatches, settings, onProgress, genealogicalTree);
+  const triangulationGroups = findTriangulations(matches, settings, onProgress, genealogicalTree);
   
   // Apply enhanced analysis if enabled
   if (settings.enableRelationshipPrediction || settings.enableConfidenceScoring) {
@@ -208,6 +259,7 @@ export const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress
         segments: [],
         yHaplogroup: match.yHaplogroup,
         mtHaplogroup: match.mtHaplogroup,
+        lineage: match.lineage,
         ancestralSurnames: new Set(match.ancestralSurnames || []),
         locations: new Set(match.locations || []),
         notes: new Set(match.notes ? [match.notes] : []),
@@ -236,6 +288,9 @@ export const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress
     }
     if (!profile.mtHaplogroup && match.mtHaplogroup) {
       profile.mtHaplogroup = match.mtHaplogroup;
+    }
+    if (!profile.lineage && match.lineage) {
+      profile.lineage = match.lineage;
     }
     
     // Merge multi-value fields
@@ -270,6 +325,7 @@ export const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress
         sourceFile: sourceFilesList.length > 1 ? sourceFilesList.join(', ') : segment.sourceFile,
         yHaplogroup: profile.yHaplogroup,
         mtHaplogroup: profile.mtHaplogroup,
+        lineage: profile.lineage,
         ancestralSurnames: mergedAncestralSurnames.length > 0 ? mergedAncestralSurnames : undefined,
         locations: mergedLocations.length > 0 ? mergedLocations : undefined,
         notes: mergedNotes || undefined
@@ -414,6 +470,7 @@ export const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, setting
       const ancestralSurnames = row['ancestralSurnames'] || row['Ancestral Surnames'] || row['Surnames'];
       const locations = row['locations'] || row['Paternal Country of Origin'] || row['Paternal Origin'];
       const notes = row['notes'] || row['Notes'] || row['Comments'];
+      const lineage = normalizeLineage(row['Lineage'] || row['lineage']);
       
       // Validate data
       if (matchName && 
@@ -437,6 +494,7 @@ export const parseMatchesFromCSV = (csvData: CSVRow[], fileName: string, setting
         if (ancestralSurnames) match.ancestralSurnames = ancestralSurnames.split(/[,;|]/).map(s => s.trim()).filter(s => s);
         if (locations) match.locations = locations.split(/[,;|]/).map(l => l.trim()).filter(l => l);
         if (notes) match.notes = notes.trim();
+        if (lineage) match.lineage = lineage;
         
         matches.push(match);
       }
@@ -512,6 +570,9 @@ export const findTriangulations = (
   // Assign stable IDs so selection and annotations survive filtering, sorting and paging
   finalGroups.forEach((group, index) => {
     group.id = index;
+    const { lineage, conflict } = summarizeLineage(group.matches);
+    group.lineage = lineage;
+    group.lineageConflict = conflict;
   });
   
   return finalGroups;
@@ -611,6 +672,7 @@ const findTriangulationsOnChromosome = (
     const overlappingMatches = [baseMatch];
     const overlappingIndices = [i];
     const people = new Set([canonicalizeName(baseMatch.matchName)]);
+    let groupLineage = baseMatch.lineage;
     
     // The region shared by every member of the group so far. Each new member
     // is tested against this region (not just the base match) so that all
@@ -632,6 +694,13 @@ const findTriangulationsOnChromosome = (
       const person = canonicalizeName(testMatch.matchName);
       if (people.has(person)) continue;
       
+      // Matches tagged to different branches sit on different copies of the
+      // chromosome (or different ancestors), so they cannot triangulate
+      if (settings.separateByLineage && groupLineage && testMatch.lineage &&
+          !lineagesCompatible(groupLineage, testMatch.lineage)) {
+        continue;
+      }
+      
       const overlapStart = Math.max(regionStart, testMatch.startPosition);
       const overlapEnd = Math.min(regionEnd, testMatch.endPosition);
       
@@ -646,6 +715,7 @@ const findTriangulationsOnChromosome = (
           overlappingMatches.push(testMatch);
           overlappingIndices.push(j);
           people.add(person);
+          groupLineage = mergeLineages(groupLineage, testMatch.lineage);
           regionStart = overlapStart;
           regionEnd = overlapEnd;
         }

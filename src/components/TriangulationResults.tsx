@@ -1,26 +1,31 @@
 import React, { useState } from 'react';
 import { Users, MapPin, TrendingUp, ChevronDown, ChevronUp, Tag, Star, TreePine, Dna, FileText } from 'lucide-react';
 import { TriangulationGroup } from '../types/triangulation';
+import { groupKey } from '../utils/triangulationEngine';
+import { LINEAGE_OPTIONS, describeLineage, lineageImpossibleOnX } from '../utils/lineage';
 
 interface TriangulationResultsProps {
   groups: TriangulationGroup[];
+  onLineageChange?: (matchName: string, lineage: string) => void;
   selectedGroup?: number;
   onGroupSelect?: (groupId: number) => void;
 }
 
 export const TriangulationResults: React.FC<TriangulationResultsProps> = ({ 
   groups,
+  onLineageChange,
   selectedGroup,
   onGroupSelect
 }) => {
-  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  // Keyed by groupKey so a group stays open when lineage tags regroup the results
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  const toggleGroup = (groupIndex: number) => {
+  const toggleGroup = (key: string) => {
     const newExpanded = new Set(expandedGroups);
-    if (newExpanded.has(groupIndex)) {
-      newExpanded.delete(groupIndex);
+    if (newExpanded.has(key)) {
+      newExpanded.delete(key);
     } else {
-      newExpanded.add(groupIndex);
+      newExpanded.add(key);
     }
     setExpandedGroups(newExpanded);
   };
@@ -99,12 +104,13 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
         <div className="divide-y divide-gray-100">
           {groups.map(group => {
             const groupIndex = group.id;
-            const isExpanded = expandedGroups.has(groupIndex);
+            const key = groupKey(group);
+            const isExpanded = expandedGroups.has(key);
             const isSelected = selectedGroup === groupIndex;
             
             return (
               <div 
-                key={groupIndex} 
+                key={key} 
                 className={`p-6 transition-colors duration-200 ${
                   isSelected ? 'bg-blue-50 border-l-4 border-blue-500' : ''
                 }`}
@@ -114,7 +120,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                   className="flex items-center justify-between cursor-pointer hover:bg-gray-50 -m-2 p-2 rounded-lg transition-colors duration-200"
                   onClick={(e) => {
                     e.stopPropagation();
-                    toggleGroup(groupIndex);
+                    toggleGroup(key);
                   }}
                 >
                   <div className="flex items-center space-x-4">
@@ -133,6 +139,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                         {group.matches.length} matches • {group.averageSize.toFixed(1)} cM avg • 
                         {group.startPosition.toLocaleString()}-{group.endPosition.toLocaleString()}
                       </div>
+                      <LineageBadge group={group} />
                       {group.relationshipPrediction && (
                         <div className="text-xs text-blue-600 mt-1">
                           {group.relationshipPrediction.relationship} ({group.relationshipPrediction.confidence} confidence)
@@ -197,6 +204,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                         <thead>
                           <tr className="border-b border-gray-200">
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Match Name</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Lineage</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Source File</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Start Position</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">End Position</th>
@@ -211,6 +219,29 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                           {group.matches.map((match, matchIndex) => (
                             <tr key={matchIndex} className="border-b border-gray-100 hover:bg-gray-50">
                               <td className="py-3 px-4 text-gray-800 font-medium">{match.matchName}</td>
+                              <td className="py-3 px-4 text-gray-600" onClick={(e) => e.stopPropagation()}>
+                                <select
+                                  value={match.lineage || ''}
+                                  onChange={(e) => onLineageChange?.(match.matchName, e.target.value)}
+                                  disabled={!onLineageChange}
+                                  title={match.lineage ? describeLineage(match.lineage) : 'Tag which line this match is related through'}
+                                  className="px-2 py-1 border border-gray-300 rounded text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                  <option value="">Untagged</option>
+                                  {LINEAGE_OPTIONS.map((paths, generation) => (
+                                    <optgroup key={generation} label={GENERATION_LABELS[generation]}>
+                                      {paths.map(path => (
+                                        <option key={path} value={path}>{path} · {describeLineage(path)}</option>
+                                      ))}
+                                    </optgroup>
+                                  ))}
+                                </select>
+                                {!match.lineage && group.lineage && (
+                                  <div className="text-xs text-gray-400 mt-1" title="Inferred from the tagged matches in this group">
+                                    likely {group.lineage}
+                                  </div>
+                                )}
+                              </td>
                               <td className="py-3 px-4 text-gray-600">
                                 {match.sourceFile ? (
                                   <div className="flex items-center">
@@ -339,6 +370,46 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
           })}
         </div>
       </div>
+    </div>
+  );
+};
+const GENERATION_LABELS = ['Parents', 'Grandparents', 'Great-grandparents', '2nd great-grandparents'];
+
+const LineageBadge: React.FC<{ group: TriangulationGroup }> = ({ group }) => {
+  const isX = group.chromosome === 23;
+
+  if (group.lineageConflict) {
+    return (
+      <div
+        className="inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-700"
+        title="Members are tagged to different branches. Turn on 'Separate Groups by Lineage' in Analysis Settings to split them."
+      >
+        Mixed lineage
+      </div>
+    );
+  }
+
+  if (!group.lineage) return null;
+
+  const paternal = group.lineage.startsWith('P');
+  return (
+    <div className="flex flex-wrap items-center gap-1 mt-1">
+      <span
+        className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+          paternal ? 'bg-sky-100 text-sky-800' : 'bg-rose-100 text-rose-800'
+        }`}
+        title="Most specific line shared by the tagged matches in this group"
+      >
+        {describeLineage(group.lineage)} ({group.lineage})
+      </span>
+      {isX && lineageImpossibleOnX(group.lineage) && (
+        <span
+          className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-800"
+          title="A father never passes his X chromosome to his son, so X DNA cannot come through a father's father. Check these tags."
+        >
+          Not possible on X
+        </span>
+      )}
     </div>
   );
 };

@@ -49,6 +49,7 @@ The application automatically detects and processes CSV files from various sourc
 - **mtDNA Haplogroup**: Maternal haplogroup information
 - **Ancestral Surnames**: Known family surnames
 - **Notes**: Additional match information
+- **Lineage**: Which line the match is related through (`P`, `M`, `PPM`, `Paternal`, ...)
 
 ### Supported Platforms
 - 23andMe chromosome browser exports
@@ -109,7 +110,20 @@ npm run build
 - Select a group (in the list or the chromosome browser), then use **Add research notes** to record notes, surnames, locations and tags
 - Export results for external analysis
 
-### 5. GEDCOM Integration (Optional)
+### 5. Tag Lineages to Separate Your Lines
+You carry two copies of each chromosome, one from each parent, so matches from different lines can overlap at the same position without being related to each other. Tagging the matches you can place keeps those lines apart.
+
+- In any group, use the **Lineage** dropdown next to a match to say which line it is related through. Paths read from you outwards using **P** (father) and **M** (mother):
+  - `P` = Dad's side, `M` = Mom's side
+  - `PP` = Dad's dad, `PM` = Dad's mom
+  - `PMP` = Dad's mom's dad, and so on (up to four generations)
+- Groups regroup immediately. With **Separate Groups by Lineage** on (Analysis Settings, default on), a match is never grouped with matches tagged to a different branch: `PP` and `PPM` can share a group, `PP` and `PM` cannot.
+- Each group shows the most specific line its tagged members share. Untagged members show the group's line as a suggestion ("likely PPM").
+- Use the **Lineage** filter to see one line and everything further back on it (e.g. `PPP` for Dad's dad's dad), groups with no tags yet, or groups with conflicting tags.
+- X chromosome groups tagged through a father's father (`PP` anywhere in the path) are flagged, because a father never passes his X chromosome to his son.
+- Tags are saved in your browser and reused for future uploads. You can also tag in bulk by adding a `Lineage` column to your CSV (values like `P`, `PPM`, `Paternal`, `Maternal`).
+
+### 6. GEDCOM Integration (Optional)
 - Upload GEDCOM file for family tree cross-referencing
 - Enable cross-verification in settings
 - View suggested common ancestors

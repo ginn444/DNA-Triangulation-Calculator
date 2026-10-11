@@ -1,14 +1,14 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Upload, FileText, Search, Download, AlertCircle, CheckCircle2, TreePine } from 'lucide-react';
 import { FileUpload } from './FileUpload';
 import { TriangulationResults } from './TriangulationResults';
 import { SettingsPanel } from './SettingsPanel';
 import { FilterAndAnnotation } from './FilterAndAnnotation';
 import { ChromosomeBrowser } from './ChromosomeBrowser';
-import { processTriangulation } from '../utils/triangulationEngine';
+import { buildTriangulationGroups, canonicalizeName, groupKey, loadMatches, LineageTags } from '../utils/triangulationEngine';
 import { getDetectedHeaders } from '../utils/csvParser';
 import { 
-  TriangulationGroup, 
+  DNAMatch,
   ProcessingStatus, 
   TriangulationSettings, 
   FilterOptions,
@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS: TriangulationSettings = {
   enableRelationshipPrediction: true,
   enableConfidenceScoring: true,
   enableCrossVerification: true,
+  separateByLineage: true,
   maxResultsPerPage: 200
 };
 
@@ -33,11 +34,25 @@ const DEFAULT_FILTERS: FilterOptions = {
   sortOrder: 'asc'
 };
 
+const LINEAGE_STORAGE_KEY = 'dna-triangulation-lineage-tags';
+
+// Lineage tags are kept in this browser so they survive reloads and new uploads
+const loadLineageTags = (): LineageTags => {
+  try {
+    const stored = localStorage.getItem(LINEAGE_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
 // Quotes a value for CSV output, escaping embedded quotes
 const csvEscape = (value: string | number): string => `"${String(value).replace(/"/g, '""')}"`;
 
 export const TriangulationCalculator: React.FC = () => {
-  const [triangulationGroups, setTriangulationGroups] = useState<TriangulationGroup[]>([]);
+  const [loadedMatches, setLoadedMatches] = useState<DNAMatch[]>([]);
+  const [annotations, setAnnotations] = useState<Record<string, GroupAnnotation>>({});
+  const [lineageTags, setLineageTags] = useState<LineageTags>(loadLineageTags);
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatus>('idle');
   const [processingMessage, setProcessingMessage] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +65,23 @@ export const TriangulationCalculator: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [nameIssuesWarning, setNameIssuesWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LINEAGE_STORAGE_KEY, JSON.stringify(lineageTags));
+    } catch {
+      // Storage unavailable (private window, blocked site data): tags last for this visit only
+    }
+  }, [lineageTags]);
+
+  // Regroup whenever the loaded matches, settings or lineage tags change
+  const triangulationGroups = useMemo(() => {
+    if (loadedMatches.length === 0) return [];
+    return buildTriangulationGroups(loadedMatches, settings, lineageTags, () => {}, genealogicalTree)
+      .map(group => ({ ...group, annotations: annotations[groupKey(group)] }));
+  }, [loadedMatches, settings, lineageTags, genealogicalTree, annotations]);
+
+  const lineageTagCount = Object.values(lineageTags).filter(Boolean).length;
 
   // Filter and sort triangulation groups
   const filteredAndSortedGroups = useMemo(() => {
@@ -75,6 +107,15 @@ export const TriangulationCalculator: React.FC = () => {
       if (filterOptions.generation && group.relationshipPrediction) {
         const groupGeneration = extractGenerationNumber(group.relationshipPrediction.relationship);
         if (groupGeneration !== filterOptions.generation) return false;
+      }
+      
+      // Lineage filter: a branch (and everything deeper), untagged groups, or conflicts
+      if (filterOptions.lineage === 'untagged') {
+        if (group.lineage || group.lineageConflict) return false;
+      } else if (filterOptions.lineage === 'conflict') {
+        if (!group.lineageConflict) return false;
+      } else if (filterOptions.lineage && !group.lineage?.startsWith(filterOptions.lineage)) {
+        return false;
       }
       
       // Search term filter
@@ -125,7 +166,8 @@ export const TriangulationCalculator: React.FC = () => {
     setUploadedFiles(files);
     setError(null);
     setNameIssuesWarning(null);
-    setTriangulationGroups([]);
+    setLoadedMatches([]);
+    setAnnotations({});
     setProcessingStatus('idle');
     setCurrentPage(1);
     
@@ -153,7 +195,7 @@ export const TriangulationCalculator: React.FC = () => {
     setSelectedGroup(undefined);
 
     try {
-      const results = await processTriangulation(
+      const matches = await loadMatches(
         uploadedFiles, 
         settings,
         (message) => {
@@ -166,9 +208,9 @@ export const TriangulationCalculator: React.FC = () => {
         genealogicalTree // Pass the genealogical tree
       );
       
-      setTriangulationGroups(results);
+      setLoadedMatches(matches);
+      setAnnotations({});
       setProcessingStatus('completed');
-      setProcessingMessage(`Found ${results.length} triangulation groups`);
       setCurrentPage(1);
       
       // Clear uploaded files from memory after processing
@@ -206,7 +248,8 @@ Please check that your CSV files contain:
 
   const handleReset = useCallback(() => {
     setUploadedFiles([]);
-    setTriangulationGroups([]);
+    setLoadedMatches([]);
+    setAnnotations({});
     setProcessingStatus('idle');
     setProcessingMessage('');
     setError(null);
@@ -220,7 +263,7 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Surnames,Locations,Tags,Common Ancestors',
+      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage',
       ...triangulationGroups.flatMap(group =>
         group.matches.map(match => [
           group.id + 1,
@@ -239,7 +282,9 @@ Please check that your CSV files contain:
           group.annotations?.surnames?.join('; ') || match.ancestralSurnames?.join('; ') || '',
           group.annotations?.locations?.join('; ') || match.locations?.join('; ') || '',
           group.annotations?.tags?.join('; ') || '',
-          group.commonAncestors?.join('; ') || ''
+          group.commonAncestors?.join('; ') || '',
+          match.lineage || '',
+          group.lineageConflict ? 'CONFLICT' : group.lineage || ''
         ].map(csvEscape).join(','))
       )
     ].join('\n');
@@ -257,13 +302,15 @@ Please check that your CSV files contain:
   }, [triangulationGroups]);
 
   const handleAnnotationChange = useCallback((groupId: number, annotation: GroupAnnotation) => {
-    setTriangulationGroups(prev => 
-      prev.map(group => 
-        group.id === groupId 
-          ? { ...group, annotations: annotation }
-          : group
-      )
-    );
+    const group = triangulationGroups.find(g => g.id === groupId);
+    if (group) {
+      setAnnotations(prev => ({ ...prev, [groupKey(group)]: annotation }));
+    }
+  }, [triangulationGroups]);
+
+  const handleLineageChange = useCallback((matchName: string, lineage: string) => {
+    // '' is stored (not deleted) so it can clear a lineage that came from the CSV
+    setLineageTags(prev => ({ ...prev, [canonicalizeName(matchName)]: lineage }));
   }, []);
 
   const handleTreeUpload = useCallback(async (file: File) => {
@@ -401,6 +448,17 @@ Please check that your CSV files contain:
                 </button>
               )}
 
+              {lineageTagCount > 0 && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Remove all ${lineageTagCount} lineage tags?`)) setLineageTags({});
+                  }}
+                  className="w-full text-sm text-gray-500 hover:text-red-600 underline"
+                >
+                  Clear {lineageTagCount} lineage tag{lineageTagCount === 1 ? '' : 's'}
+                </button>
+              )}
+
               <button
                 onClick={handleReset}
                 className="w-full bg-gray-500 text-white py-3 px-4 rounded-xl font-medium 
@@ -460,7 +518,9 @@ Please check that your CSV files contain:
                   <CheckCircle2 className="w-5 h-5 text-green-600 mr-3 mt-0.5 flex-shrink-0" />
                   <div>
                     <h4 className="text-sm font-medium text-green-800">Completed</h4>
-                    <p className="text-sm text-green-700 mt-1">{processingMessage}</p>
+                    <p className="text-sm text-green-700 mt-1">
+                      Found {triangulationGroups.length} triangulation groups in {loadedMatches.length} segments
+                    </p>
                   </div>
                 </div>
               )}
@@ -496,6 +556,7 @@ Please check that your CSV files contain:
           {filteredAndSortedGroups.length > 0 && (
             <TriangulationResults 
               groups={currentGroupsForDisplay}
+              onLineageChange={handleLineageChange}
               selectedGroup={selectedGroup}
               onGroupSelect={setSelectedGroup}
             />

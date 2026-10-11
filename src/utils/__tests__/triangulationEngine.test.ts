@@ -15,6 +15,7 @@ const settings: TriangulationSettings = {
   enableRelationshipPrediction: false,
   enableConfidenceScoring: false,
   enableCrossVerification: false,
+  separateByLineage: true,
   maxResultsPerPage: 25
 };
 
