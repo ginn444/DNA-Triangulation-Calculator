@@ -204,8 +204,7 @@ export const TriangulationCalculator: React.FC = () => {
           if (message.includes('unclear names')) {
             setNameIssuesWarning('Some matches have unclear names (like numbers). Check the "Source File" column to identify which file they came from.');
           }
-        },
-        genealogicalTree // Pass the genealogical tree
+        }
       );
       
       setLoadedMatches(matches);
@@ -244,7 +243,7 @@ Please check that your CSV files contain:
       setProcessingStatus('error');
       setProcessingMessage('');
     }
-  }, [uploadedFiles, settings, genealogicalTree]);
+  }, [uploadedFiles, settings]);
 
   const handleReset = useCallback(() => {
     setUploadedFiles([]);

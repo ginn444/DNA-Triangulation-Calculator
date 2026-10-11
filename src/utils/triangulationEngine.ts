@@ -35,44 +35,25 @@ interface MatchProfile {
   sourceFiles: Set<string>;
 }
 
-/**
- * Deduplicates and cleans an array of names by removing duplicates,
- * filtering out single-letter entries and empty strings, and sorting alphabetically.
- */
-const deduplicateNames = (rawNames: string[]): string[] => {
-  // Join all names into a single string, then split by commas and spaces
-  const combinedNames = rawNames.join(', ');
-  
-  return Array.from(
-    new Set(
-      combinedNames
-        .split(/[,\s]+/)                      // Split on commas and spaces
-        .map(name => name.trim().toLowerCase()) // Normalize (trim + lowercase)
-        .filter(name => name.length > 1)         // Filter out junk/empty or 1-letter noise
-    )
-  ).sort(); // Alphabetize the results
-};
-
 export const processTriangulation = async (
   files: File[], 
   settings: TriangulationSettings = DEFAULT_SETTINGS,
   onProgress: (message: string) => void,
   genealogicalTree: GenealogicalTree | null = null
 ): Promise<TriangulationGroup[]> => {
-  const matches = await loadMatches(files, settings, onProgress, genealogicalTree);
+  const matches = await loadMatches(files, settings, onProgress);
   return buildTriangulationGroups(matches, settings, {}, onProgress, genealogicalTree);
 };
 
 /**
- * Parses, deduplicates and (optionally) tree-enriches the DNA segments in the
+ * Parses and deduplicates the DNA segments in the
  * uploaded files. The result can be regrouped with buildTriangulationGroups
  * without re-reading the files, e.g. after lineage tags change.
  */
 export const loadMatches = async (
   files: File[], 
   settings: TriangulationSettings = DEFAULT_SETTINGS,
-  onProgress: (message: string) => void,
-  genealogicalTree: GenealogicalTree | null = null
+  onProgress: (message: string) => void
 ): Promise<DNAMatch[]> => {
   onProgress('Parsing uploaded CSV files...');
   
@@ -114,14 +95,6 @@ export const loadMatches = async (
   
   // Deduplicate and merge matches
   const deduplicatedMatches = deduplicateAndMergeMatches(allRawMatches, onProgress);
-  
-  // Populate tree information for each DNA match if genealogical tree is available
-  if (genealogicalTree && settings.enableCrossVerification) {
-    onProgress('Enriching DNA matches with genealogical tree data...');
-    for (const match of deduplicatedMatches) {
-      populateDNAMatchTreeInfo(match, genealogicalTree);
-    }
-  }
   
   return deduplicatedMatches;
 };
@@ -171,6 +144,15 @@ export const buildTriangulationGroups = (
     };
   });
   
+  // Link matches to the tree here (not when loading) so a GEDCOM uploaded after
+  // calculating still applies
+  if (genealogicalTree && settings.enableCrossVerification) {
+    onProgress('Enriching DNA matches with genealogical tree data...');
+    for (const match of matches) {
+      populateDNAMatchTreeInfo(match, genealogicalTree);
+    }
+  }
+  
   onProgress(`Processing ${matches.length} deduplicated DNA segments...`);
   
   // Find triangulations
@@ -216,56 +198,71 @@ const typicalMemberTotal = (matches: DNAMatch[]): number => {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
+/**
+ * Links a DNA match to people in your tree who share a surname with it (from the
+ * match's own name or its listed ancestral surnames), or who have the same name.
+ * Surnames must match exactly so short names like "Li" don't match "Williams".
+ */
 const populateDNAMatchTreeInfo = (match: DNAMatch, genealogicalTree: GenealogicalTree): void => {
-  const treeMatches: TreeMatchInfo[] = [];
+  const candidateSurnames = new Set(
+    [...extractSurnamesFromName(match.matchName), ...(match.ancestralSurnames || [])]
+      .map(surname => surname.trim().toLowerCase())
+      .filter(surname => surname.length > 1)
+  );
+  const matchNameLower = match.matchName.trim().toLowerCase();
   
-  // Extract surnames from match name
-  const matchSurnames = extractSurnamesFromName(match.matchName);
-  const allSurnames = new Set<string>();
-  
-  // Add surnames from match name
-  matchSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
-  
-  // Add ancestral surnames if available
-  if (match.ancestralSurnames) {
-    match.ancestralSurnames.forEach(surname => allSurnames.add(surname.toLowerCase()));
+  const linkedSurnames = new Set<string>();
+  const linkedPeople = new Set<string>();
+  for (const individual of genealogicalTree.individuals) {
+    const sharedSurnames = individual.surnames.filter(surname => candidateSurnames.has(surname.toLowerCase()));
+    if (sharedSurnames.length > 0 || individual.name.toLowerCase() === matchNameLower) {
+      sharedSurnames.forEach(surname => linkedSurnames.add(surname));
+      linkedPeople.add(individual.name);
+    }
   }
   
-  // Find matching individuals in the genealogical tree
-  const matchingIndividuals = genealogicalTree.individuals.filter(individual => {
-    const individualName = individual.name.toLowerCase();
-    const matchNameLower = match.matchName.toLowerCase();
+  match.treeMatchInfo = linkedPeople.size > 0
+    ? [{
+        matchName: match.matchName,
+        treeIndividuals: Array.from(linkedPeople),
+        commonSurnames: Array.from(linkedSurnames),
+        suggestedAncestors: Array.from(linkedPeople)
+      }]
+    : undefined;
+};
+
+/**
+ * Adds tree context to groups without changing them: the tree surnames carried by
+ * the group's members, and the surname lines shared by two or more of them.
+ * (Groups used to be split per tree person and dropped when fewer than the
+ * minimum matches linked to one person, which removed nearly every group.)
+ */
+const annotateGroupsWithTree = (groups: TriangulationGroup[]): void => {
+  for (const group of groups) {
+    const peopleBySurname = new Map<string, Set<string>>();
+    const treeMatchesByPerson = new Map<string, TreeMatchInfo>();
+    for (const match of group.matches) {
+      const person = canonicalizeName(match.matchName);
+      for (const info of match.treeMatchInfo || []) {
+        treeMatchesByPerson.set(person, info);
+        for (const surname of info.commonSurnames) {
+          if (!peopleBySurname.has(surname)) peopleBySurname.set(surname, new Set());
+          peopleBySurname.get(surname)!.add(person);
+        }
+      }
+    }
     
-    // Check if names match or contain each other
-    return individualName.includes(matchNameLower) || 
-           matchNameLower.includes(individualName) ||
-           individual.surnames.some(surname => 
-             matchSurnames.some(matchSurname => 
-               surname.toLowerCase().includes(matchSurname.toLowerCase()) ||
-               matchSurname.toLowerCase().includes(surname.toLowerCase())
-             )
-           );
-  });
-  
-  if (matchingIndividuals.length > 0) {
-    const commonSurnames = new Set<string>();
-    const suggestedAncestors = new Set<string>();
+    const totalPeople = countDistinctPeople(group.matches);
+    const lines = Array.from(peopleBySurname.entries())
+      .sort(([a, aPeople], [b, bPeople]) => bPeople.size - aPeople.size || a.localeCompare(b));
     
-    matchingIndividuals.forEach(individual => {
-      individual.surnames.forEach(surname => commonSurnames.add(surname));
-      suggestedAncestors.add(individual.name);
-    });
-    
-    treeMatches.push({
-      matchName: match.matchName,
-      treeIndividuals: deduplicateNames(matchingIndividuals.map(i => i.name)),
-      commonSurnames: Array.from(commonSurnames),
-      suggestedAncestors: Array.from(suggestedAncestors)
-    });
+    group.surnames = lines.map(([surname]) => surname);
+    const sharedLines = lines
+      .filter(([, people]) => people.size >= 2)
+      .map(([surname, people]) => `${surname} line (${people.size} of ${totalPeople} matches)`);
+    group.commonAncestors = sharedLines.length > 0 ? sharedLines : undefined;
+    group.treeMatches = treeMatchesByPerson.size > 0 ? Array.from(treeMatchesByPerson.values()) : undefined;
   }
-  
-  // Set the tree match info on the DNA match
-  match.treeMatchInfo = treeMatches.length > 0 ? treeMatches : undefined;
 };
 
 export const deduplicateAndMergeMatches = (rawMatches: RawDNAMatch[], onProgress: (message: string) => void = () => {}): DNAMatch[] => {
@@ -568,11 +565,10 @@ export const findTriangulations = (
     initialTriangulationGroups.push(...groups);
   }
   
-  // Split groups by single common ancestor if genealogical tree is available
-  let finalGroups = initialTriangulationGroups;
+  const finalGroups = initialTriangulationGroups;
   if (genealogicalTree && settings.enableCrossVerification) {
-    onProgress('Splitting groups by common ancestors...');
-    finalGroups = splitGroupsBySingleCommonAncestor(initialTriangulationGroups, settings);
+    onProgress('Adding family tree surname lines to groups...');
+    annotateGroupsWithTree(finalGroups);
   }
   
   // Sort groups by common ancestor first, then by chromosome and position
@@ -601,83 +597,6 @@ export const findTriangulations = (
     group.lineage = lineage;
     group.lineageConflict = conflict;
   });
-  
-  return finalGroups;
-};
-
-const splitGroupsBySingleCommonAncestor = (
-  initialGroups: TriangulationGroup[],
-  settings: TriangulationSettings
-): TriangulationGroup[] => {
-  const finalGroups: TriangulationGroup[] = [];
-  
-  for (const initialGroup of initialGroups) {
-    // Collect all unique suggested ancestors from the matches in this group
-    const ancestorToMatches = new Map<string, DNAMatch[]>();
-    
-    for (const match of initialGroup.matches) {
-      if (match.treeMatchInfo) {
-        for (const treeMatch of match.treeMatchInfo) {
-          for (const ancestor of treeMatch.suggestedAncestors) {
-            if (!ancestorToMatches.has(ancestor)) {
-              ancestorToMatches.set(ancestor, []);
-            }
-            ancestorToMatches.get(ancestor)!.push(match);
-          }
-        }
-      }
-    }
-    
-    // If no ancestors found, keep the original group
-    if (ancestorToMatches.size === 0) {
-      finalGroups.push(initialGroup);
-      continue;
-    }
-    
-    // Create new groups for each ancestor
-    for (const [ancestor, matchesForAncestor] of ancestorToMatches) {
-      // Remove duplicates (a match might be associated with the same ancestor multiple times)
-      const uniqueMatches = Array.from(new Set(matchesForAncestor));
-      
-      // Only create group if it meets minimum match requirements
-      if (countDistinctPeople(uniqueMatches) >= settings.minimumMatches) {
-        // Calculate the overlapping region for this subset
-        const startPosition = Math.max(...uniqueMatches.map(m => m.startPosition));
-        const endPosition = Math.min(...uniqueMatches.map(m => m.endPosition));
-        
-        if (endPosition > startPosition) {
-          const totalSize = uniqueMatches.reduce((sum, match) => sum + match.sizeCM, 0);
-          const averageSize = totalSize / uniqueMatches.length;
-          
-          // Create tree matches for this specific ancestor
-          const treeMatches: TreeMatchInfo[] = [];
-          for (const match of uniqueMatches) {
-            if (match.treeMatchInfo) {
-              const relevantTreeMatches = match.treeMatchInfo.filter(tm => 
-                tm.suggestedAncestors.includes(ancestor)
-              );
-              treeMatches.push(...relevantTreeMatches);
-            }
-          }
-          
-          const newGroup: TriangulationGroup = {
-            id: 0, // Assigned after sorting
-            chromosome: initialGroup.chromosome,
-            startPosition,
-            endPosition,
-            matches: uniqueMatches,
-            averageSize,
-            totalSize,
-            confidenceScore: 0, // Will be calculated later
-            commonAncestors: [ancestor], // Single ancestor for this group
-            treeMatches: treeMatches.length > 0 ? treeMatches : undefined
-          };
-          
-          finalGroups.push(newGroup);
-        }
-      }
-    }
-  }
   
   return finalGroups;
 };

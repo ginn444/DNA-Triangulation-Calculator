@@ -249,7 +249,7 @@ export const FilterAndAnnotation: React.FC<FilterAndAnnotationProps> = ({
             <option value="matches">Matches</option>
             <option value="confidenceScore">Confidence</option>
             <option value="startPosition">Start Position</option>
-            <option value="commonAncestors">Suggested Common Ancestor</option>
+            <option value="commonAncestors">Tree Surname Line</option>
           </select>
           
           <button

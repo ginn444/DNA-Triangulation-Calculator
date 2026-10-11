@@ -312,7 +312,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                       <div className="mt-4 p-4 bg-green-50 rounded-lg">
                         <h4 className="font-medium text-green-800 mb-2 flex items-center">
                           <TreePine className="w-4 h-4 mr-2" />
-                          Genealogical Tree Matches
+                          Tree People Sharing a Surname With These Matches
                         </h4>
                         <div className="space-y-2">
                           {group.treeMatches.map((treeMatch, idx) => (
@@ -335,7 +335,10 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                     {/* Common ancestors */}
                     {group.commonAncestors && group.commonAncestors.length > 0 && (
                       <div className="mt-4 p-4 bg-yellow-50 rounded-lg">
-                        <h4 className="font-medium text-yellow-800 mb-2">Suggested Common Ancestors</h4>
+                        <h4 className="font-medium text-yellow-800 mb-1">Surname Lines Shared in Your Tree</h4>
+                        <p className="text-xs text-yellow-700 mb-2">
+                          Surnames in your tree carried by two or more matches in this group. A lead to research, not proof.
+                        </p>
                         <div className="flex flex-wrap gap-2">
                           {group.commonAncestors.map((ancestor, idx) => (
                             <span key={idx} className="px-3 py-1 bg-yellow-200 text-yellow-800 text-sm rounded-full">
