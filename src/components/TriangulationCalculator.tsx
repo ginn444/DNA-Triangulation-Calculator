@@ -263,7 +263,7 @@ Please check that your CSV files contain:
     if (triangulationGroups.length === 0) return;
 
     const csvContent = [
-      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Relationship Prediction,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage',
+      'Group ID,Match Name,Source File,Chromosome,Start Position,End Position,Size (cM),Matching SNPs,Y-Haplogroup,mtDNA-Haplogroup,Total Matches,Confidence Score,Group Typical Relationship,Surnames,Locations,Tags,Common Ancestors,Match Lineage,Group Lineage,Match Total Shared (cM),Match Relationship Prediction',
       ...triangulationGroups.flatMap(group =>
         group.matches.map(match => [
           group.id + 1,
@@ -284,7 +284,9 @@ Please check that your CSV files contain:
           group.annotations?.tags?.join('; ') || '',
           group.commonAncestors?.join('; ') || '',
           match.lineage || '',
-          group.lineageConflict ? 'CONFLICT' : group.lineage || ''
+          group.lineageConflict ? 'CONFLICT' : group.lineage || '',
+          match.totalSharedCM?.toFixed(1) || '',
+          match.relationshipPrediction?.relationship || ''
         ].map(csvEscape).join(','))
       )
     ].join('\n');

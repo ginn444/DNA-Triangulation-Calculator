@@ -19,6 +19,8 @@ export interface DNAMatch {
   treeMatchInfo?: TreeMatchInfo[];
   // Lineage path tagged by the user, e.g. "PPM" = father's father's mother (see utils/lineage.ts)
   lineage?: string;
+  // Total cM this person shares with you across every uploaded segment
+  totalSharedCM?: number;
 }
 
 export interface RelationshipPrediction {

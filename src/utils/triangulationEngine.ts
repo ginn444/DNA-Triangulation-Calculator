@@ -149,10 +149,26 @@ export const buildTriangulationGroups = (
   onProgress: (message: string) => void = () => {},
   genealogicalTree: GenealogicalTree | null = null
 ): TriangulationGroup[] => {
+  // Each person's total shared cM across all their uploaded segments. Relationships
+  // are predicted per person from this, never from a group's combined cM: a group of
+  // 100 people sharing 20 cM each is 100 distant cousins, not one 2,000 cM relative.
+  const totalsByPerson = new Map<string, number>();
+  for (const match of loadedMatches) {
+    const person = canonicalizeName(match.matchName);
+    totalsByPerson.set(person, (totalsByPerson.get(person) ?? 0) + match.sizeCM);
+  }
+  
   // Copy so grouping never mutates the loaded matches
   const matches = loadedMatches.filter(match => match.sizeCM >= settings.minimumSize).map(match => {
-    const tag = lineageTags[canonicalizeName(match.matchName)];
-    return { ...match, lineage: tag !== undefined ? (tag || undefined) : match.lineage };
+    const person = canonicalizeName(match.matchName);
+    const tag = lineageTags[person];
+    const totalSharedCM = totalsByPerson.get(person) ?? match.sizeCM;
+    return {
+      ...match,
+      lineage: tag !== undefined ? (tag || undefined) : match.lineage,
+      totalSharedCM,
+      relationshipPrediction: settings.enableRelationshipPrediction ? predictRelationship(totalSharedCM) : undefined
+    };
   });
   
   onProgress(`Processing ${matches.length} deduplicated DNA segments...`);
@@ -166,7 +182,7 @@ export const buildTriangulationGroups = (
     triangulationGroups.forEach(group => {
       // Calculate confidence score
       if (settings.enableConfidenceScoring) {
-        const totalCM = group.matches.reduce((sum, match) => sum + match.sizeCM, 0);
+        const totalCM = typicalMemberTotal(group.matches);
         const averageOverlap = calculateAverageOverlap(group.matches);
         group.confidenceScore = calculateConfidenceScore(
           group.averageSize,
@@ -176,10 +192,9 @@ export const buildTriangulationGroups = (
         );
       }
       
-      // Predict relationship
+      // Relationship of a typical member (median person), for the cousin-level filters
       if (settings.enableRelationshipPrediction) {
-        const totalCM = group.matches.reduce((sum, match) => sum + match.sizeCM, 0);
-        group.relationshipPrediction = predictRelationship(totalCM);
+        group.relationshipPrediction = predictRelationship(typicalMemberTotal(group.matches));
       }
     });
   }
@@ -187,6 +202,18 @@ export const buildTriangulationGroups = (
   onProgress(`Analysis complete: Found ${triangulationGroups.length} triangulation groups`);
   
   return triangulationGroups;
+};
+
+/** Median total shared cM across the distinct people in a group */
+const typicalMemberTotal = (matches: DNAMatch[]): number => {
+  const totals = new Map<string, number>();
+  for (const match of matches) {
+    totals.set(canonicalizeName(match.matchName), match.totalSharedCM ?? match.sizeCM);
+  }
+  const sorted = Array.from(totals.values()).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
 const populateDNAMatchTreeInfo = (match: DNAMatch, genealogicalTree: GenealogicalTree): void => {

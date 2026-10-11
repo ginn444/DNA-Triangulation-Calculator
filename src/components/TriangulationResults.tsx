@@ -141,8 +141,8 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                       </div>
                       <LineageBadge group={group} />
                       {group.relationshipPrediction && (
-                        <div className="text-xs text-blue-600 mt-1">
-                          {group.relationshipPrediction.relationship} ({group.relationshipPrediction.confidence} confidence)
+                        <div className="text-xs text-blue-600 mt-1" title="Predicted from the median person's total shared cM, not the group's combined cM">
+                          Typical match: {group.relationshipPrediction.relationship} ({group.relationshipPrediction.confidence} confidence)
                         </div>
                       )}
                     </div>
@@ -209,6 +209,7 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Start Position</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">End Position</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Size (cM)</th>
+                            <th className="text-left py-3 px-4 font-medium text-gray-700">Total Shared</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">SNPs</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">Y-Haplogroup</th>
                             <th className="text-left py-3 px-4 font-medium text-gray-700">mtDNA</th>
@@ -257,6 +258,12 @@ export const TriangulationResults: React.FC<TriangulationResultsProps> = ({
                               <td className="py-3 px-4 text-gray-600">{match.startPosition.toLocaleString()}</td>
                               <td className="py-3 px-4 text-gray-600">{match.endPosition.toLocaleString()}</td>
                               <td className="py-3 px-4 text-gray-600">{match.sizeCM.toFixed(2)}</td>
+                              <td className="py-3 px-4 text-gray-600" title="This person's total cM across all uploaded segments">
+                                {match.totalSharedCM !== undefined ? `${match.totalSharedCM.toFixed(1)} cM` : 'N/A'}
+                                {match.relationshipPrediction && (
+                                  <div className="text-xs text-blue-600">{match.relationshipPrediction.relationship}</div>
+                                )}
+                              </td>
                               <td className="py-3 px-4 text-gray-600">{match.matchingSNPs || 'N/A'}</td>
                               <td className="py-3 px-4 text-gray-600">
                                 {match.yHaplogroup ? (
