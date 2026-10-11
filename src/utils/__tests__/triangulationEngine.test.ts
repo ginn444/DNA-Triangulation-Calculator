@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   deduplicateAndMergeMatches,
+  buildTriangulationGroups,
   findTriangulations,
   parseChromosome,
   parseMatchesFromCSV
@@ -122,5 +123,32 @@ describe('findTriangulations', () => {
     ], settings);
 
     expect(groups.map(g => [g.id, g.chromosome])).toEqual([[0, 2], [1, 9]]);
+  });
+});
+
+describe('relationship prediction', () => {
+  const predictSettings = { ...settings, enableRelationshipPrediction: true };
+
+  it('predicts from each person\'s own total, not the group\'s combined cM', () => {
+    // 100 people each sharing one 20 cM segment: 2,000 cM combined, but every one is a distant cousin
+    const people = Array.from({ length: 100 }, (_, i) => ({ ...segment(`Cousin ${i}`, 100 + i, 1000), sizeCM: 20 }));
+    const groups = buildTriangulationGroups(people, predictSettings);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].relationshipPrediction?.relationship).toMatch(/Cousin/);
+    expect(groups[0].relationshipPrediction?.relationship).not.toMatch(/Sibling|Grandparent|Parent/);
+    expect(groups[0].matches[0].totalSharedCM).toBe(20);
+  });
+
+  it('adds up all of a person\'s segments, including other chromosomes', () => {
+    const groups = buildTriangulationGroups([
+      { ...segment('Alice', 100, 1000), sizeCM: 30 },
+      { ...segment('Alice', 100, 1000, 3), sizeCM: 40 },
+      segment('Bob', 200, 1100),
+      segment('Carol', 300, 900)
+    ], predictSettings);
+
+    const alice = groups[0].matches.find(m => m.matchName === 'Alice');
+    expect(alice?.totalSharedCM).toBe(70);
   });
 });
