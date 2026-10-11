@@ -1,3 +1,5 @@
+import { GenerationEstimate } from '../utils/segmentAge';
+
 export interface DNAMatch {
   matchName: string;
   chromosome: number;
@@ -56,6 +58,8 @@ export interface TriangulationGroup {
   sharedCM: number;
   // Distinct matches in the whole upload with a segment covering this stretch
   regionMatchCount: number;
+  // Genetic clock: how many generations back the shared ancestor most likely lived
+  generationEstimate?: GenerationEstimate;
   relationshipPrediction?: RelationshipPrediction;
   annotations?: GroupAnnotation;
   commonAncestors?: string[];
@@ -132,9 +136,14 @@ export interface TreeIndividual {
   id: string;
   name: string;
   surnames: string[];
+  sex?: 'M' | 'F';
   birthDate?: string;
   deathDate?: string;
+  birthPlace?: string;
+  // Every place recorded for the person (birth, residence, death, ...)
   locations?: string[];
+  // The GEDCOM file the person came from, when several trees are loaded
+  sourceFile?: string;
 }
 
 export interface TreeRelationship {
@@ -142,6 +151,8 @@ export interface TreeRelationship {
   individual1: string;
   individual2: string;
   relationshipType: string;
+  // For 'parent-child': whether individual1 is the father or the mother
+  parentRole?: 'father' | 'mother';
 }
 
 export interface CrossVerificationResult {

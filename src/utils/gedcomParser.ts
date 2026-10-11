@@ -1,5 +1,16 @@
 import { GenealogicalTree, TreeIndividual, TreeRelationship } from '../types/triangulation';
 
+const finishIndividual = (partial: Partial<TreeIndividual>): TreeIndividual => ({
+  id: partial.id!,
+  name: partial.name || 'Unknown',
+  surnames: partial.surnames || [],
+  sex: partial.sex,
+  birthDate: partial.birthDate,
+  deathDate: partial.deathDate,
+  birthPlace: partial.birthPlace,
+  locations: partial.locations || []
+});
+
 export const parseGEDCOM = async (file: File): Promise<GenealogicalTree> => {
   return parseGEDCOMText(await file.text());
 };
@@ -32,14 +43,7 @@ export const parseGEDCOMText = (text: string): GenealogicalTree => {
     if (level === 0) {
       // Save previous individual/family
       if (currentIndividual && currentIndividual.id) {
-        const individual: TreeIndividual = {
-          id: currentIndividual.id,
-          name: currentIndividual.name || 'Unknown',
-          surnames: currentIndividual.surnames || [],
-          birthDate: currentIndividual.birthDate,
-          deathDate: currentIndividual.deathDate,
-          locations: currentIndividual.locations || []
-        };
+        const individual = finishIndividual(currentIndividual);
         individuals.push(individual);
         individualMap.set(individual.id, individual);
       }
@@ -61,7 +65,8 @@ export const parseGEDCOMText = (text: string): GenealogicalTree => {
               id: `rel_${currentFamily.id}_father_${child}`,
               individual1: currentFamily.husband,
               individual2: child,
-              relationshipType: 'parent-child'
+              relationshipType: 'parent-child',
+              parentRole: 'father'
             });
           }
           if (currentFamily.wife) {
@@ -69,7 +74,8 @@ export const parseGEDCOMText = (text: string): GenealogicalTree => {
               id: `rel_${currentFamily.id}_mother_${child}`,
               individual1: currentFamily.wife,
               individual2: child,
-              relationshipType: 'parent-child'
+              relationshipType: 'parent-child',
+              parentRole: 'mother'
             });
           }
         }
@@ -103,15 +109,10 @@ export const parseGEDCOMText = (text: string): GenealogicalTree => {
             currentIndividual.surnames = surnames;
             break;
           }
-          case 'BIRT':
-            // Birth event started
-            break;
-          case 'DEAT':
-            // Death event started
-            break;
-          case 'PLAC':
-            if (!currentIndividual.locations) currentIndividual.locations = [];
-            currentIndividual.locations.push(value);
+          case 'SEX':
+            if (value.toUpperCase() === 'M' || value.toUpperCase() === 'F') {
+              currentIndividual.sex = value.toUpperCase() as 'M' | 'F';
+            }
             break;
         }
       } else if (currentFamily) {
@@ -141,6 +142,7 @@ export const parseGEDCOMText = (text: string): GenealogicalTree => {
             // "Gainesville,,Allen,Kentucky,USA" -> "Gainesville, Allen, Kentucky, USA"
             const place = value.split(',').map(part => part.trim()).filter(Boolean).join(', ');
             if (!place) break;
+            if (currentEvent === 'BIRT' && !currentIndividual.birthPlace) currentIndividual.birthPlace = place;
             if (!currentIndividual.locations) currentIndividual.locations = [];
             if (!currentIndividual.locations.includes(place)) currentIndividual.locations.push(place);
             break;
@@ -152,14 +154,7 @@ export const parseGEDCOMText = (text: string): GenealogicalTree => {
   
   // Save the last individual/family
   if (currentIndividual && currentIndividual.id) {
-    const individual: TreeIndividual = {
-      id: currentIndividual.id,
-      name: currentIndividual.name || 'Unknown',
-      surnames: currentIndividual.surnames || [],
-      birthDate: currentIndividual.birthDate,
-      deathDate: currentIndividual.deathDate,
-      locations: currentIndividual.locations || []
-    };
+    const individual = finishIndividual(currentIndividual);
     individuals.push(individual);
     individualMap.set(individual.id, individual);
   }

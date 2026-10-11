@@ -1,6 +1,7 @@
 import { DNAMatch, EvidenceLevel, TriangulationGroup, CSVRow, TriangulationSettings, GenealogicalTree, TreeMatchInfo } from '../types/triangulation';
 import { parseCSV } from './csvParser';
 import { predictRelationship } from './relationshipPredictor';
+import { estimateGenerations } from './segmentAge';
 import { lineagesCompatible, mergeLineages, normalizeLineage, summarizeLineage } from './lineage';
 
 const DEFAULT_SETTINGS: TriangulationSettings = {
@@ -164,6 +165,9 @@ export const buildTriangulationGroups = (
     group.regionMatchCount = coverage.peopleInRegion(group.chromosome, group.startPosition, group.endPosition);
     group.evidence = classifyEvidence(group.sharedCM, group.regionMatchCount, coverage.pileUpThreshold);
     group.confidenceScore = EVIDENCE_RANK[group.evidence];
+    // Genetic clock from the members' own segment lengths (median, so one unusually
+    // long or short segment does not swing it), above the match list's reporting threshold
+    group.generationEstimate = estimateGenerations(median(group.matches.map(m => m.sizeCM)), settings.minimumSize);
     
     // Relationship of a typical member (median person), for the cousin-level filters
     if (settings.enableRelationshipPrediction) {
@@ -174,6 +178,12 @@ export const buildTriangulationGroups = (
   onProgress(`Analysis complete: Found ${triangulationGroups.length} triangulation groups`);
   
   return triangulationGroups;
+};
+
+const median = (values: number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
 /** Median total shared cM across the distinct people in a group */
